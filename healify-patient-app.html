@@ -485,6 +485,150 @@ window.fbLogout = async function() {
   localStorage.removeItem('helify_sessions');
   await _sb.auth.signOut();
 };
+
+// ═══════════════════════════════════════════════
+// AUTH UI FUNCTIONS — defined early so buttons work
+// ═══════════════════════════════════════════════
+function switchAuthTab(tab) {
+  document.getElementById('loginForm').style.display = tab==='login' ? '' : 'none';
+  document.getElementById('registerForm').style.display = tab==='register' ? '' : 'none';
+  document.getElementById('tabLogin').classList.toggle('on', tab==='login');
+  document.getElementById('tabRegister').classList.toggle('on', tab==='register');
+}
+
+async function doLogin() {
+  const email = document.getElementById('loginEmail')?.value.trim() || '';
+  const pass  = document.getElementById('loginPass')?.value || '';
+  const errEl = document.getElementById('loginErr');
+  const btn   = document.getElementById('loginBtn');
+  if (!email || !pass) { errEl.textContent = 'Please fill in all fields'; return; }
+  btn.disabled = true; btn.textContent = 'Signing in…'; errEl.textContent = '';
+  try {
+    const { error } = await _sb.auth.signInWithPassword({
+      email: email.toLowerCase().trim(), password: pass
+    });
+    if (error) throw new Error(error.message);
+  } catch(e) {
+    const msg = (e.message || '').toLowerCase();
+    if (msg.includes('invalid') || msg.includes('credentials')) {
+      errEl.textContent = 'Wrong email or password';
+    } else if (msg.includes('email') && msg.includes('confirm')) {
+      errEl.textContent = 'Please verify your email first — check your inbox';
+    } else {
+      errEl.textContent = e.message || 'Sign in failed — try again';
+    }
+    btn.disabled = false; btn.textContent = 'Sign In →';
+  }
+}
+
+async function doRegister() {
+  const name        = document.getElementById('regName')?.value.trim()      || '';
+  const age         = document.getElementById('regAge')?.value.trim()        || '';
+  const city        = document.getElementById('regCity')?.value.trim()       || '';
+  const condition   = document.getElementById('regCondition')?.value.trim()  || '';
+  const email       = document.getElementById('regEmail')?.value.trim()      || '';
+  const pass        = document.getElementById('regPass')?.value              || '';
+  const surgeon     = document.getElementById('regSurgeon')?.value.trim()    || '';
+  const surgeryDate = document.getElementById('regSurgeryDate')?.value       || '';
+  const planDays    = parseInt(document.getElementById('regPlanDays')?.value) || 30;
+  const errEl       = document.getElementById('registerErr');
+  const btn         = document.getElementById('registerBtn');
+
+  if (!name)          { errEl.textContent = 'Please enter your full name'; return; }
+  if (!email)         { errEl.textContent = 'Please enter your email'; return; }
+  if (!pass)          { errEl.textContent = 'Please create a password'; return; }
+  if (pass.length<6)  { errEl.textContent = 'Password must be at least 6 characters'; return; }
+
+  btn.disabled = true; btn.textContent = 'Creating account…'; errEl.textContent = '';
+
+  try {
+    const { data, error } = await _sb.auth.signUp({
+      email: email.toLowerCase().trim(),
+      password: pass,
+      options: { data: { name } }
+    });
+    if (error) throw new Error(error.message);
+    if (!data?.user) throw new Error('Account creation failed — try again');
+
+    // Save profile
+    const profileData = { id: data.user.id, email: email.toLowerCase().trim(), name, role: 'patient' };
+    if (age)         profileData.age           = parseInt(age);
+    if (condition)   profileData.condition     = condition;
+    if (city)        profileData.city          = city;
+    if (surgeon)     profileData.surgeon       = surgeon;
+    if (surgeryDate) profileData.surgery_date  = surgeryDate;
+    if (planDays)    profileData.plan_duration = planDays;
+
+    await _sb.from('profiles').upsert(profileData, { onConflict: 'id' });
+    showVerifyScreen(email);
+
+  } catch(e) {
+    const msg = e.message || '';
+    if (msg.toLowerCase().includes('already'))         errEl.textContent = 'Email already registered — sign in instead';
+    else if (msg.toLowerCase().includes('invalid'))    errEl.textContent = 'Invalid email address';
+    else if (msg.toLowerCase().includes('password'))   errEl.textContent = 'Password too weak — use 6+ characters';
+    else                                               errEl.textContent = msg || 'Something went wrong';
+    btn.disabled = false; btn.textContent = 'Create Account →';
+  }
+}
+
+async function signOutUser() {
+  if (confirm('Sign out of Healify?')) {
+    localStorage.removeItem('helify_sessions');
+    try { await _sb.auth.signOut(); } catch(e) {}
+    showAuthScreen();
+  }
+}
+
+function showVerifyScreen(email) {
+  const el = document.getElementById('verifyEmailAddr');
+  if (el) el.textContent = email || 'your email';
+  document.getElementById('verifyScreen')?.classList.add('show');
+  document.getElementById('authScreen')?.classList.add('hidden');
+  const statusEl = document.getElementById('resendStatus');
+  if (statusEl) statusEl.textContent = '';
+  window._pendingVerifyEmail = email;
+}
+
+function hideVerifyScreen() {
+  document.getElementById('verifyScreen')?.classList.remove('show');
+  document.getElementById('authScreen')?.classList.remove('hidden');
+  switchAuthTab('login');
+  const emailInp = document.getElementById('loginEmail');
+  if (emailInp && window._pendingVerifyEmail) emailInp.value = window._pendingVerifyEmail;
+}
+
+async function resendVerification() {
+  const email = window._pendingVerifyEmail;
+  if (!email) return;
+  const btn    = document.getElementById('resendBtn');
+  const status = document.getElementById('resendStatus');
+  btn.disabled = true; status.textContent = 'Sending…';
+  try {
+    const { error } = await _sb.auth.resend({ type: 'signup', email });
+    status.textContent = error ? 'Error: ' + error.message : '✓ Email resent!';
+  } catch(e) { status.textContent = 'Failed — try again'; }
+  setTimeout(() => { btn.disabled = false; }, 30000);
+}
+
+function showApp() {
+  document.getElementById('authScreen')?.classList.add('hidden');
+  document.getElementById('verifyScreen')?.classList.remove('show');
+  document.getElementById('appRoot')?.classList.add('visible');
+  injectDesktopSidebar();
+  nav('home');
+  refreshHomeStats();
+  try { initTTS(); } catch(e) {}
+}
+
+function showAuthScreen() {
+  document.getElementById('authScreen')?.classList.remove('hidden');
+  document.getElementById('verifyScreen')?.classList.remove('show');
+  document.getElementById('appRoot')?.classList.remove('visible');
+  switchAuthTab('login');
+  const btn = document.getElementById('loginBtn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Sign In →'; }
+}
 </script>
 <!-- MediaPipe -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
@@ -1211,7 +1355,7 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
     <div class="verify-ico">📬</div>
     <div class="verify-title">Check your email</div>
     <div class="verify-sub">We sent a verification link to:</div>
-    <div class="verify-email-show" id="verifyEmailAddr">your@email.com</div>
+    <div class="verify-email-show" id="verifyEmailAddr"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="80f9eff5f2c0e5ede1e9ecaee3efed">[email&#160;protected]</a></div>
     <div class="verify-steps">
       <div class="verify-step"><div class="verify-step-num">1</div><div>Open your email inbox — check spam if you don't see it within 1 minute</div></div>
       <div class="verify-step"><div class="verify-step-num">2</div><div>Click the <strong>Confirm your email</strong> link in the Healify email</div></div>
@@ -1251,11 +1395,7 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
         </div>
         <div class="auth-err" id="loginErr"></div>
         <button class="auth-btn" id="loginBtn" onclick="doLogin()">Sign In →</button>
-        <div class="auth-divider">or</div>
-        <button class="auth-google" onclick="doGoogleLogin()">
-          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20H24v8h11.3C33.6 33.2 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34.1 6.5 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20c11 0 19.6-7.9 19.6-20 0-1.3-.1-2.7-.4-4z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 15.1 18.9 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34.1 6.5 29.3 4 24 4 16.3 4 9.7 8.4 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-1.9 13.5-5L31.8 34c-2.1 1.4-4.7 2.2-7.8 2.2-5.2 0-9.6-3.5-11.2-8.3l-6.5 5C9.5 39.4 16.3 44 24 44z"/><path fill="#1976D2" d="M43.6 20H24v8h11.3c-.8 2.2-2.2 4-4.1 5.3L37.5 39C41.5 35.3 44 30 44 24c0-1.3-.1-2.7-.4-4z"/></svg>
-          Continue with Google
-        </button>
+
       </div>
 
       <!-- REGISTER FORM -->
@@ -2520,17 +2660,7 @@ function clearHistory() {
 // ═══════════════════════════════════════════════
 // AUTH HELPERS
 // ═══════════════════════════════════════════════
-function showApp() {
-  document.getElementById('authScreen').classList.add('hidden');
-  document.getElementById('verifyScreen').classList.remove('show');
-  document.getElementById('appRoot').classList.add('visible');
-  // Inject desktop sidebar header if on desktop
-  injectDesktopSidebar();
-  // Always land on home screen after login
-  nav('home');
-  refreshHomeStats();
-  initTTS();
-}
+// showApp defined in first script block
 
 function injectDesktopSidebar() {
   if (window.innerWidth < 1024) return;
@@ -2544,138 +2674,14 @@ function injectDesktopSidebar() {
     <div style="font-size:11px;color:var(--mut);margin-top:2px;">AI Rehab Platform</div>`;
   wrap.insertBefore(hdr, wrap.firstChild);
 }
-function showAuthScreen() {
-  document.getElementById('authScreen').classList.remove('hidden');
-  document.getElementById('verifyScreen').classList.remove('show');
-  document.getElementById('appRoot').classList.remove('visible');
-  // Reset to login tab
-  switchAuthTab('login');
-  // Reset login button in case it was stuck disabled
-  const btn = document.getElementById('loginBtn');
-  if (btn) { btn.disabled = false; btn.textContent = 'Sign In →'; }
-}
-function showVerifyScreen(email) {
-  document.getElementById('verifyEmailAddr').textContent = email || 'your email';
-  document.getElementById('verifyScreen').classList.add('show');
-  document.getElementById('authScreen').classList.add('hidden');
-  document.getElementById('resendStatus').textContent = '';
-  // Store email for resend
-  window._pendingVerifyEmail = email;
-}
+// showAuthScreen defined in first script block
+// verify functions defined in first script block
 
-function hideVerifyScreen() {
-  document.getElementById('verifyScreen').classList.remove('show');
-  document.getElementById('authScreen').classList.remove('hidden');
-  // Switch to login tab so they can sign in after verifying
-  switchAuthTab('login');
-  const emailInp = document.getElementById('loginEmail');
-  if (emailInp && window._pendingVerifyEmail) emailInp.value = window._pendingVerifyEmail;
-}
-
-async function resendVerification() {
-  const email = window._pendingVerifyEmail;
-  if (!email) return;
-  const btn = document.getElementById('resendBtn');
-  const status = document.getElementById('resendStatus');
-  btn.disabled = true;
-  status.textContent = 'Sending…';
-  try {
-    const { error } = await _sb.auth.resend({ type: 'signup', email });
-    if (error) { status.textContent = 'Error: ' + error.message; }
-    else { status.textContent = '✓ Verification email resent!'; }
-  } catch(e) { status.textContent = 'Failed to resend. Try again.'; }
-  setTimeout(() => { btn.disabled = false; }, 30000); // 30s cooldown
-}
-
-function switchAuthTab(tab) {
-  document.getElementById('loginForm').style.display = tab==='login' ? '' : 'none';
-  document.getElementById('registerForm').style.display = tab==='register' ? '' : 'none';
-  document.getElementById('tabLogin').classList.toggle('on', tab==='login');
-  document.getElementById('tabRegister').classList.toggle('on', tab==='register');
-}
-async function doLogin() {
-  const email = document.getElementById('loginEmail').value.trim();
-  const pass  = document.getElementById('loginPass').value;
-  const errEl = document.getElementById('loginErr');
-  const btn   = document.getElementById('loginBtn');
-  if (!email || !pass) { errEl.textContent = 'Please fill in all fields'; return; }
-  btn.disabled = true; btn.textContent = 'Signing in…'; errEl.textContent = '';
-  try {
-    if (window.fbLogin) await window.fbLogin(email, pass);
-    else { showApp(); }
-  } catch(e) {
-    const msg = (e.message || '').toLowerCase();
-    if (msg.includes('invalid') || msg.includes('credentials') || msg.includes('wrong')) {
-      errEl.textContent = 'Wrong email or password';
-    } else if (msg.includes('not found') || msg.includes('no user')) {
-      errEl.textContent = 'No account found with this email';
-    } else if (msg.includes('email') && msg.includes('confirm')) {
-      errEl.textContent = 'Please verify your email first — check your inbox';
-    } else {
-      errEl.textContent = e.message || 'Sign in failed — try again';
-    }
-    btn.disabled = false; btn.textContent = 'Sign In →';
-  }
-}
-async function doGoogleLogin() {
-  try {
-    if (window.fbGoogleLogin) await window.fbGoogleLogin();
-    else showApp();
-  } catch(e) { document.getElementById('loginErr').textContent = e.message; }
-}
-async function doRegister() {
-  // Safely read all fields — use ?. so missing fields don't crash
-  const name        = document.getElementById('regName')?.value.trim()        || '';
-  const age         = document.getElementById('regAge')?.value.trim()         || '';
-  const city        = document.getElementById('regCity')?.value.trim()        || '';
-  const condition   = document.getElementById('regCondition')?.value.trim()   || '';
-  const email       = document.getElementById('regEmail')?.value.trim()       || '';
-  const pass        = document.getElementById('regPass')?.value               || '';
-  const surgeon     = document.getElementById('regSurgeon')?.value.trim()     || '';
-  const surgeryDate = document.getElementById('regSurgeryDate')?.value        || '';
-  const planDays    = document.getElementById('regPlanDays')?.value           || '30';
-  const errEl       = document.getElementById('registerErr');
-  const btn         = document.getElementById('registerBtn');
-
-  // Validate
-  if (!name)  { errEl.textContent = 'Please enter your full name'; return; }
-  if (!email) { errEl.textContent = 'Please enter your email address'; return; }
-  if (!pass)  { errEl.textContent = 'Please create a password'; return; }
-  if (pass.length < 6) { errEl.textContent = 'Password must be at least 6 characters'; return; }
-
-  btn.disabled = true; btn.textContent = 'Creating account…'; errEl.textContent = '';
-
-  try {
-    if (window.fbRegister) {
-      await window.fbRegister(name, email, pass, age, condition, city, surgeon, surgeryDate, parseInt(planDays)||30);
-      showVerifyScreen(email);
-    } else {
-      showApp();
-    }
-  } catch(e) {
-    const msg = e.message || '';
-    if (msg.toLowerCase().includes('already') || msg.toLowerCase().includes('registered')) {
-      errEl.textContent = 'Email already registered — sign in instead';
-    } else if (msg.toLowerCase().includes('invalid email')) {
-      errEl.textContent = 'Invalid email address — check and try again';
-    } else if (msg.toLowerCase().includes('weak password') || msg.toLowerCase().includes('password')) {
-      errEl.textContent = 'Password too weak — use at least 6 characters';
-    } else {
-      errEl.textContent = msg || 'Something went wrong — please try again';
-    }
-    btn.disabled = false; btn.textContent = 'Create Account →';
-  }
-}
-async function signOutUser() {
-  if (confirm('Sign out of Healify?')) {
-    localStorage.removeItem('helify_sessions');
-    localStorage.removeItem('healify_sessions');
-    try {
-      await _sb.auth.signOut();
-    } catch(e) { console.warn('Signout:', e); }
-    showAuthScreen();
-  }
-}
+// switchAuthTab defined in first script block
+// doLogin defined in first script block
+// Google login removed
+// doRegister defined in first script block
+// signOutUser defined in first script block
 
 // ═══════════════════════════════════════════════
 // INIT — runs after all HTML/JS is parsed
@@ -2684,12 +2690,4 @@ document.addEventListener('DOMContentLoaded', function() {
   // Init TTS voices
   try { initTTS(); } catch(e) {}
 
-  // Show auth screen immediately — Supabase will call showApp() if session exists
-  showAuthScreen();
-
-  // Toggle switches
-  document.querySelectorAll('.toggle:not(#voiceToggleUI)').forEach(t => {
-    t.addEventListener('click', () => t.classList.toggle('off'));
-  });
-});
-// Fire
+  // Show auth screen immediately — Supabase will call sho
