@@ -18,27 +18,28 @@ const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
 // ══════════════════════════════════════════════════════
-// AUTH — listen for login / logout
+// AUTH — wait for full page load before attaching listener
+// This ensures showApp / showAuthScreen are defined first
 // ══════════════════════════════════════════════════════
-_sb.auth.onAuthStateChange(async (event, session) => {
-  if (session?.user) {
-    // Check if email has been verified
-    if (!session.user.email_confirmed_at) {
-      // Not verified yet — show verify screen
-      window._pendingVerifyEmail = session.user.email;
-      showVerifyScreen(session.user.email);
-      return;
+window.addEventListener('load', function() {
+  _sb.auth.onAuthStateChange(async (event, session) => {
+    if (session?.user) {
+      // Check if email has been verified
+      if (!session.user.email_confirmed_at) {
+        window._pendingVerifyEmail = session.user.email;
+        if (typeof showVerifyScreen === 'function') showVerifyScreen(session.user.email);
+        return;
+      }
+      window._currentUser = session.user;
+      document.getElementById('verifyScreen')?.classList.remove('show');
+      if (typeof loadAllUserData === 'function') await loadAllUserData(session.user.id);
+      if (typeof showApp === 'function') showApp();
+    } else {
+      window._currentUser = null;
+      window._userProfile = null;
+      if (typeof showAuthScreen === 'function') showAuthScreen();
     }
-    window._currentUser = session.user;
-    // Hide verify screen if showing
-    document.getElementById('verifyScreen')?.classList.remove('show');
-    await loadAllUserData(session.user.id);
-    showApp();
-  } else {
-    window._currentUser = null;
-    window._userProfile = null;
-    showAuthScreen();
-  }
+  });
 });
 
 // ── Load everything from Supabase ──
@@ -2411,4 +2412,15 @@ async function signOutUser() {
 // INIT
 // ═══════════════════════════════════════════════
 initTTS();
+
+// Safety net: if Supabase auth hasn't resolved in 4s, show auth screen
+// (handles case where credentials aren't set yet)
+setTimeout(() => {
+  const appVisible  = document.getElementById('appRoot')?.classList.contains('visible');
+  const authHidden  = document.getElementById('authScreen')?.classList.contains('hidden');
+  const verifyShown = document.getElementById('verifyScreen')?.classList.contains('show');
+  if (!appVisible && !authHidden && !verifyShown) {
+    showAuthScreen();
+  }
+}, 4000);
 // Fire
