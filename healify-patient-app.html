@@ -1,0 +1,2375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Healify — AI Rehab</title>
+
+<!-- Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 🔑 PASTE YOUR SUPABASE CREDENTIALS HERE
+// Supabase Dashboard → Project Settings → API
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const SUPABASE_URL  = 'https://mbkmjhyeccywsbabmbss.supabase.co';       // e.g. https://xyzabc.supabase.co
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ia21qaHllY2N5d3NiYWJtYnNzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxMzQ4MzUsImV4cCI6MjA4OTcxMDgzNX0.ww8IIV1yoNWHzV-fOOFSmIXSp1xUv-L47VyEhubrLQA';  // long string starting with eyJ...
+
+const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// ══════════════════════════════════════════════════════
+// AUTH — listen for login / logout
+// ══════════════════════════════════════════════════════
+_sb.auth.onAuthStateChange(async (event, session) => {
+  if (session?.user) {
+    // Check if email has been verified
+    if (!session.user.email_confirmed_at) {
+      // Not verified yet — show verify screen
+      window._pendingVerifyEmail = session.user.email;
+      showVerifyScreen(session.user.email);
+      return;
+    }
+    window._currentUser = session.user;
+    // Hide verify screen if showing
+    document.getElementById('verifyScreen')?.classList.remove('show');
+    await loadAllUserData(session.user.id);
+    showApp();
+  } else {
+    window._currentUser = null;
+    window._userProfile = null;
+    showAuthScreen();
+  }
+});
+
+// ── Load everything from Supabase ──
+async function loadAllUserData(uid) {
+  try {
+    // 1. Profile
+    const { data: profile } = await _sb.from('profiles').select('*').eq('id', uid).single();
+    window._userProfile = profile || {};
+    const p = window._userProfile;
+
+    // 2. Sessions (last 20, newest first)
+    const { data: sessions } = await _sb
+      .from('sessions')
+      .select('*')
+      .eq('user_id', uid)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    window._sessions = sessions || [];
+    localStorage.setItem('helify_sessions', JSON.stringify(
+      (sessions||[]).map(s => ({
+        date: s.session_date,
+        leg: s.leg,
+        validReps: s.valid_reps,
+        totalReps: s.total_reps,
+        successRate: s.success_rate,
+        avgRom: s.avg_rom,
+        bestRom: s.best_rom,
+        avgTime: s.avg_time,
+        score: s.score,
+        issues: {
+          incompleteROM: s.issue_incomplete_rom,
+          tooFast: s.issue_too_fast,
+          tooSlow: s.issue_too_slow,
+          hyperextension: s.issue_hyperextension,
+          hipStability: s.issue_hip_stability,
+          jerky: s.issue_jerky,
+          wrongLeg: s.issue_wrong_leg
+        },
+        stabilityWarnings: s.stability_warnings,
+        created_at: s.created_at
+      }))
+    ));
+
+    // 3. Physio profile (lookup by patient's physio_email)
+    if (p.physio_email) {
+      const { data: physioRows } = await _sb
+        .from('profiles')
+        .select('*')
+        .eq('email', p.physio_email)
+        .eq('role', 'physio')
+        .limit(1);
+      window._physioProfile = physioRows?.[0] || null;
+    } else {
+      window._physioProfile = null;
+    }
+
+    // 4. Active prescription
+    const { data: rxRows } = await _sb
+      .from('prescriptions')
+      .select('*')
+      .eq('patient_id', uid)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    window._prescription = rxRows?.[0] || null;
+
+    // 5. Upcoming appointments (future only)
+    const { data: apptRows } = await _sb
+      .from('appointments')
+      .select('*')
+      .eq('patient_id', uid)
+      .gte('datetime', new Date().toISOString())
+      .order('datetime', { ascending: true });
+    window._appointments = apptRows || [];
+
+    // 6. Messages (last 10)
+    const { data: msgRows } = await _sb
+      .from('messages')
+      .select('*')
+      .eq('patient_id', uid)
+      .order('sent_at', { ascending: true })
+      .limit(10);
+    window._messages = msgRows || [];
+
+    // 7. Pain logs (last 10)
+    const { data: painRows } = await _sb
+      .from('pain_logs')
+      .select('*')
+      .eq('user_id', uid)
+      .order('logged_at', { ascending: false })
+      .limit(10);
+    window._painLogs = painRows || [];
+
+    // 8. Latest physio note
+    const { data: noteRows } = await _sb
+      .from('physio_notes')
+      .select('*')
+      .eq('patient_id', uid)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    window._latestNote = noteRows?.[0] || null;
+
+    // 9. Populate entire UI
+    populateAllUI();
+
+  } catch(e) { console.error('loadAllUserData:', e); }
+}
+
+// ══════════════════════════════════════════════════════
+// POPULATE ALL UI ELEMENTS
+// ══════════════════════════════════════════════════════
+window.populateAllUI = function() {
+  const p       = window._userProfile  || {};
+  const sessions= JSON.parse(localStorage.getItem('helify_sessions') || '[]');
+  const physio  = window._physioProfile || {};
+  const rx      = window._prescription;
+  const appts   = window._appointments  || [];
+  const msgs    = window._messages      || [];
+
+  // ── Calculated values ──
+  const surgeryDate  = p.surgery_date ? new Date(p.surgery_date) : null;
+  const planDays     = parseInt(p.plan_duration) || 30;
+  const today        = new Date();
+  const dayNum       = surgeryDate ? Math.max(1, Math.ceil((today - surgeryDate) / (1000*60*60*24))) : null;
+  const recoveryPct  = dayNum ? Math.min(100, Math.round((dayNum / planDays) * 100)) : 0;
+  const recoveryETA  = surgeryDate
+    ? new Date(surgeryDate.getTime() + planDays*24*60*60*1000).toLocaleDateString('en',{month:'short',day:'numeric',year:'numeric'})
+    : '—';
+
+  const streak      = calcStreak(sessions);
+  const validSess   = sessions.filter(s => s.validReps > 0);
+  const bestROM     = validSess.length ? Math.max(...validSess.map(s => s.bestRom||0)) : 0;
+  const avgQ        = validSess.length ? Math.round(validSess.reduce((a,s)=>a+(s.score||0),0)/validSess.length) : 0;
+  const lastSess    = sessions[0];
+  const prevSess    = sessions[1];
+  const totalReps   = sessions.reduce((a,s)=>a+(s.validReps||0),0);
+  const physioName  = physio.name || p.physio_email || 'Your Physio';
+
+  // ── HOME ──
+  safeSet('h-name-txt',      (p.name||'User').split(' ')[0] + ' 👋');
+  safeSet('homeStreakNum',    streak + ' Day Streak' + (streak >= 3 ? ' 🔥' : ''));
+  safeSet('homeStreakSub',    streak > 0 ? 'Keep it going — session due today' : 'Start your streak today!');
+  safeSet('homeStreakChip',   streak >= 5 ? 'On track' : streak >= 1 ? 'Going!' : 'Start now');
+  safeSet('homeBestROM',     bestROM > 0 ? bestROM + '°' : '—°');
+  safeSet('homeAvgQual',     avgQ > 0 ? avgQ + '%' : '—%');
+  safeSet('rxPhysioSub',     physioName + (dayNum ? ` · Day ${dayNum} of ${planDays}` : ''));
+  safeSet('rxPendingChip',   rx ? calcPendingChip(rx, sessions) : '—');
+  safeSet('rxTitle',         rx?.title || "Today's Session");
+
+  if (lastSess && prevSess) {
+    const diff = (lastSess.bestRom||0) - (prevSess.bestRom||0);
+    safeSet('homeROMTrend',  (diff>=0?'↑ +':'↓ ') + Math.abs(diff) + '° vs last session');
+    safeSet('homeQualTrend', lastSess.score >= 80 ? '↑ Great form' : lastSess.score >= 60 ? '↑ Good effort' : '⚠ Keep working!');
+  } else if (lastSess) {
+    safeSet('homeROMTrend',  '↑ First session — great start!');
+    safeSet('homeQualTrend', lastSess.score >= 80 ? '↑ Excellent debut' : '↑ Good start');
+  } else {
+    safeSet('homeROMTrend',  'Complete a session to see trend');
+    safeSet('homeQualTrend', 'Complete a session');
+  }
+
+  if (rx?.exercises?.length) renderPrescription(rx.exercises, sessions);
+  renderUpcoming(appts);
+
+  // ── EXERCISE PAGE ──
+  if (rx?.exercises?.length) {
+    renderExerciseList(rx.exercises, sessions);
+    safeSet('exPageSub', physioName + (dayNum ? ` · Day ${dayNum} · ${rx.exercises.length} exercises` : ''));
+  } else {
+    safeSet('exPageSub', physioName + (dayNum ? ` · Day ${dayNum}` : ''));
+  }
+
+  // ── PHYSIO PAGE ──
+  safeSet('physioDocName',          physio.name || 'Your Physio');
+  safeSet('physioDocQual',          physio.qualification || 'Physiotherapist');
+  safeSet('physioSessionsReviewed', sessions.length);
+  safeSet('physioRating',           physio.rating || '—');
+  safeSet('physioResponseTime',     physio.avg_response_time || '—');
+  renderMessages(msgs);
+  renderNextAppointment(appts[0]);
+
+  // Latest physio note
+  const note = window._latestNote;
+  if (note) {
+    safeSet('latestPhysioNote', note.text);
+    safeSet('physioNoteDate', new Date(note.created_at).toLocaleDateString('en',{month:'short',day:'numeric'}));
+  } else {
+    safeSet('latestPhysioNote', 'No notes from your physio yet.');
+  }
+
+  // ── PROFILE ──
+  safeSet('profileNameVal',       p.name        || '—');
+  safeSet('profileNameVal2',      p.name        || '—');
+  safeSet('profileAgeVal',        p.age         ? p.age + ' years' : '—');
+  safeSet('profileCityVal',       p.city        || '—');
+  safeSet('profileConditionVal',  p.condition   || '—');
+  safeSet('profilePhysioVal',     p.physio_email || '—'); // Set by admin
+  safeSet('profileConditionBadge','🦵 ' + (p.condition || 'Rehab'));
+  safeSet('profileSurgeonVal',    p.surgeon     || '—');
+  safeSet('profileSurgeryDateVal',surgeryDate ? surgeryDate.toLocaleDateString('en',{month:'short',day:'numeric',year:'numeric'}) : '—');
+  safeSet('profilePlanVal',       planDays + ' days');
+  safeSet('profileSessions',      sessions.length);
+  safeSet('profileAvgPain',       calcAvgPain());
+  safeSet('profileJoinedDate',    surgeryDate ? 'Member since ' + surgeryDate.toLocaleDateString('en',{month:'long',day:'numeric',year:'numeric'}) : 'Member');
+
+  // Recovery ring
+  updateRecoveryRing(recoveryPct, dayNum, planDays, recoveryETA);
+
+  // ── PROGRESS ──
+  safeSet('sumSessions', sessions.length);
+  safeSet('sumReps',     totalReps);
+  safeSet('sumQuality',  avgQ > 0 ? avgQ + '%' : '—%');
+};
+
+// ── Helpers ──
+window.safeSet = function(id, val) {
+  const el = document.getElementById(id); if (el) el.textContent = val;
+};
+
+window.calcStreak = function(sessions) {
+  if (!sessions.length) return 0;
+  const dates = [...new Set(sessions.map(s => new Date(s.date||s.created_at||Date.now()).toDateString()))];
+  let streak = 0;
+  for (let i = 0; i < dates.length; i++) {
+    const exp = new Date(); exp.setDate(exp.getDate() - i);
+    if (dates[i] === exp.toDateString()) streak++;
+    else break;
+  }
+  return streak;
+};
+
+function calcAvgPain() {
+  const logs = window._painLogs || [];
+  if (!logs.length) return '—';
+  return (logs.reduce((a,l)=>a+(l.pain||0),0)/logs.length).toFixed(1) + ' / 10';
+}
+
+function calcPendingChip(rx, sessions) {
+  const todayStr = new Date().toDateString();
+  const doneToday = sessions.filter(s => new Date(s.date||Date.now()).toDateString() === todayStr).length;
+  const pending = Math.max(0, (rx.exercises?.length||0) - doneToday);
+  return pending > 0 ? pending + ' pending' : 'All done ✓';
+}
+
+window.updateRecoveryRing = function(pct, dayNum, planDays, eta) {
+  const ring = document.getElementById('recoveryRingCircle');
+  if (ring) ring.setAttribute('stroke-dashoffset', 201 - (201 * pct / 100));
+  safeSet('ringPctTxt',     pct + '%');
+  safeSet('recoverySubTxt', dayNum ? `Day ${dayNum} of ${planDays} · ${pct>=100?'Complete! 🎉':'On track'}
+Estimated recovery: ${eta}` : 'Enter surgery date to track');
+  safeSet('recoveryTrend',  pct<33 ? '🌱 Early recovery — take it steady' : pct<66 ? '💪 Mid recovery — great progress' : pct<100 ? '🚀 Final stretch — nearly there!' : '🎉 Recovery plan complete!');
+};
+
+window.renderPrescription = function(exercises, sessions) {
+  const el = document.getElementById('rxExList'); if (!el) return;
+  const todayStr  = new Date().toDateString();
+  const doneCount = sessions.filter(s => new Date(s.date||Date.now()).toDateString() === todayStr).length;
+  el.innerHTML = exercises.map((ex, i) => `
+    <div class="rx-row">
+      <div class="rx-ico">${ex.icon||'🦵'}</div>
+      <div><div class="rx-rn">${ex.name}</div><div class="rx-rd">${ex.sets} sets × ${ex.reps} reps</div></div>
+      <div class="rx-st">${i < doneCount ? '✅' : '⏳'}</div>
+    </div>`).join('');
+};
+
+window.renderExerciseList = function(exercises, sessions) {
+  const el = document.getElementById('exDynamicList'); if (!el) return;
+  const todayStr  = new Date().toDateString();
+  const doneCount = sessions.filter(s => new Date(s.date||Date.now()).toDateString() === todayStr).length;
+  el.innerHTML = exercises.map((ex, i) => {
+    const done = i < doneCount, next = i === doneCount;
+    return `<div class="ex-item ${next?'selected':''}" onclick="selectEx(this)">
+      <div class="ex-item-top">
+        <div class="ex-num">${done?'✅':i+1}</div>
+        <div><div class="ex-item-name">${ex.name}</div><div class="ex-item-detail">${ex.description||''}</div></div>
+        <span class="ex-item-status ${done?'done':next?'next':'todo'}">${done?'Done':next?'Up Next':'Todo'}</span>
+      </div>
+      <div class="ex-item-meta">
+        <span class="ex-meta-pill">${ex.sets} sets</span>
+        <span class="ex-meta-pill">${ex.reps} reps</span>
+        ${ex.duration?'<span class="ex-meta-pill">~'+ex.duration+'</span>':''}
+      </div>
+    </div>`;
+  }).join('');
+};
+
+window.renderUpcoming = function(appts) {
+  const el = document.getElementById('upcomingList'); if (!el) return;
+  if (!appts?.length) { el.innerHTML='<div style="padding:12px;text-align:center;font-size:12px;color:var(--mut)">No upcoming appointments</div>'; return; }
+  el.innerHTML = appts.slice(0,3).map(a => {
+    const dt = new Date(a.datetime);
+    return `<div class="up-row">
+      <div class="up-day"><div class="up-day-n">${dt.getDate()}</div><div class="up-day-l">${dt.toLocaleDateString('en',{weekday:'short'})}</div></div>
+      <div class="up-info"><div class="up-title">${a.title||'Session'}</div><div class="up-sub">${a.subtitle||''}</div></div>
+      <span class="up-badge ${a.type==='physio'?'physio':'ai'}">${a.type==='physio'?'Physio':'AI'}</span>
+    </div>`;
+  }).join('');
+};
+
+window.renderMessages = function(msgs) {
+  const el = document.getElementById('msgThread'); if (!el) return;
+  if (!msgs?.length) { el.innerHTML='<div style="color:var(--mut);font-size:12px;text-align:center;padding:10px 0">No messages yet</div>'; return; }
+  el.innerHTML = msgs.map(m => {
+    const isPhysio = m.sender === 'physio';
+    const dt = new Date(m.sent_at||Date.now());
+    const ts = dt.toLocaleDateString('en',{month:'short',day:'numeric'}) + ', ' + dt.toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
+    return `<div>
+      <div class="msg-bubble ${isPhysio?'physio':'patient'}">${m.text}</div>
+      <div class="msg-time ${isPhysio?'':'right'}">${isPhysio?(m.sender_name||'Physio')+' · ':'You · '}${ts}</div>
+    </div>`;
+  }).join('');
+  // Scroll to bottom
+  el.scrollTop = el.scrollHeight;
+};
+
+window.renderNextAppointment = function(appt) {
+  if (!appt) {
+    safeSet('apptDateDay','—'); safeSet('apptDateMonth','—');
+    safeSet('apptSessionName','No appointment scheduled');
+    safeSet('apptTime','—'); safeSet('apptLoc','—'); return;
+  }
+  const dt  = new Date(appt.datetime);
+  const end = new Date(dt.getTime() + (appt.duration_mins||45)*60000);
+  safeSet('apptDateDay',    dt.getDate());
+  safeSet('apptDateMonth',  dt.toLocaleDateString('en',{month:'short'}));
+  safeSet('apptSessionName',appt.title||'Appointment');
+  safeSet('apptTime',       '⏰ ' + dt.toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'}) + ' – ' + end.toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'}));
+  safeSet('apptLoc',        '📍 ' + (appt.location||'TBD'));
+};
+
+// ══════════════════════════════════════════════════════
+// WRITE OPERATIONS
+// ══════════════════════════════════════════════════════
+
+// Save session after exercise
+window.saveSessionToFirestore = async function(data) {
+  if (!window._currentUser) return;
+  const { error } = await _sb.from('sessions').insert({
+    user_id:             _currentUser.id,
+    session_date:        data.date || new Date().toISOString(),
+    leg:                 data.leg,
+    valid_reps:          data.validReps    || 0,
+    total_reps:          data.totalReps    || 0,
+    success_rate:        data.successRate  || 0,
+    avg_rom:             data.avgRom       || 0,
+    best_rom:            data.bestRom      || 0,
+    avg_time:            parseFloat(data.avgTime) || 0,
+    score:               data.score        || 0,
+    stability_warnings:  data.stabilityWarnings || 0,
+    issue_incomplete_rom:  data.issues?.incompleteROM  || 0,
+    issue_too_fast:        data.issues?.tooFast        || 0,
+    issue_too_slow:        data.issues?.tooSlow        || 0,
+    issue_hyperextension:  data.issues?.hyperextension || 0,
+    issue_hip_stability:   data.issues?.hipStability   || 0,
+    issue_jerky:           data.issues?.jerky          || 0,
+    issue_wrong_leg:       data.issues?.wrongLeg       || 0
+  });
+  if (error) console.warn('Save session error:', error);
+};
+
+// Send message to physio
+window.sendMessage = async function() {
+  const inp  = document.getElementById('msgInputField');
+  const text = inp?.value?.trim();
+  if (!text || !window._currentUser) return;
+  const { error } = await _sb.from('messages').insert({
+    patient_id:  _currentUser.id,
+    sender:      'patient',
+    sender_name: window._userProfile?.name || 'Patient',
+    text
+  });
+  if (!error) {
+    inp.value = '';
+    // Reload messages
+    const { data } = await _sb.from('messages').select('*').eq('patient_id',_currentUser.id).order('sent_at',{ascending:true}).limit(10);
+    window._messages = data || [];
+    renderMessages(window._messages);
+  }
+};
+
+// Log pain score
+window.logPain = async function(val) {
+  if (!window._currentUser) return;
+  await _sb.from('pain_logs').insert({ user_id: _currentUser.id, pain: val });
+};
+
+// ══════════════════════════════════════════════════════
+// AUTH ACTIONS
+// ══════════════════════════════════════════════════════
+
+window.fbRegister = async function(name, email, password, age, condition, city, surgeon, surgeryDate, planDuration) {
+  // 1. Create auth user (no email confirmation required)
+  const { data, error } = await _sb.auth.signUp({ email, password });
+  if (error) throw error;
+  // 2. Upsert profile
+  const { error: pErr } = await _sb.from('profiles').upsert({
+    id:            data.user.id,
+    email,
+    name,
+    age:           age ? parseInt(age) : null,
+    condition,
+    city,
+    surgeon:       surgeon || null,
+    surgery_date:  surgeryDate || null,
+    plan_duration: planDuration || 30,
+    role:          'patient'
+  });
+  if (pErr) console.warn('Profile upsert:', pErr);
+  return data;
+};
+
+window.fbLogin = async function(email, password) {
+  const { data, error } = await _sb.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  return data;
+};
+
+window.fbGoogleLogin = async function() {
+  const { data, error } = await _sb.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: window.location.href }
+  });
+  if (error) throw error;
+  return data;
+};
+
+window.fbLogout = async function() {
+  localStorage.removeItem('helify_sessions');
+  await _sb.auth.signOut();
+};
+</script>
+<!-- MediaPipe -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<!-- PDF & Email -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --gd:   #1B4332;
+  --gm:   #2D6A4F;
+  --gl:   #40916C;
+  --glt:  #74C69D;
+  --gp:   #D8F3DC;
+  --bg:   #F4F1EC;
+  --w:    #FFFFFF;
+  --txt:  #1A2E22;
+  --sub:  #52796F;
+  --mut:  #8A9E94;
+  --bdr:  #E0EBE4;
+  --gold: #D97706;
+  --red:  #DC2626;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+body{
+  background:#CBD5C0;
+  min-height:100vh;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  padding:20px 16px 40px;
+  font-family:'Nunito',sans-serif;
+}
+
+/* ── VERIFY EMAIL SCREEN ── */
+#verifyScreen{
+  position:fixed;inset:0;z-index:9998;
+  background:#CBD5C0;
+  display:none;align-items:center;justify-content:center;
+  padding:20px;
+}
+#verifyScreen.show{display:flex;}
+.verify-phone{
+  width:100%;max-width:380px;
+  background:var(--bg);border-radius:44px;
+  overflow:hidden;
+  box-shadow:0 0 0 10px #1a1a1a,0 0 0 11px #333,0 30px 80px rgba(0,0,0,0.45);
+  display:flex;flex-direction:column;align-items:center;
+  padding:60px 36px 48px;text-align:center;gap:0;
+}
+.verify-ico{font-size:56px;margin-bottom:16px;}
+.verify-title{font-size:22px;font-weight:900;color:var(--gd);margin-bottom:8px;}
+.verify-sub{font-size:13px;color:var(--mut);font-weight:600;line-height:1.6;margin-bottom:6px;}
+.verify-email-show{font-size:14px;font-weight:800;color:var(--gm);background:var(--gp);padding:8px 20px;border-radius:100px;margin-bottom:20px;}
+.verify-steps{background:var(--w);border-radius:16px;padding:16px;width:100%;text-align:left;margin-bottom:20px;}
+.verify-step{display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid var(--bdr);font-size:12px;color:var(--txt);}
+.verify-step:last-child{border-bottom:none;}
+.verify-step-num{width:22px;height:22px;border-radius:50%;background:var(--gm);color:#fff;font-size:11px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;}
+.verify-back{font-size:13px;font-weight:700;color:var(--mut);background:none;border:none;cursor:pointer;font-family:'Nunito',sans-serif;text-decoration:underline;margin-top:4px;}
+.verify-resend{font-size:12px;font-weight:700;color:var(--gm);background:none;border:none;cursor:pointer;font-family:'Nunito',sans-serif;margin-top:8px;}
+/* ── AUTH SCREEN ── */
+#authScreen{
+  position:fixed;inset:0;z-index:9999;
+  background:#CBD5C0;
+  display:flex;align-items:center;justify-content:center;
+  padding:20px;
+}
+#authScreen.hidden{display:none;}
+.auth-phone{
+  width:100%;max-width:380px;
+  background:var(--bg);border-radius:44px;
+  overflow:hidden;
+  box-shadow:0 0 0 10px #1a1a1a,0 0 0 11px #333,0 30px 80px rgba(0,0,0,0.45);
+  min-height:700px;display:flex;flex-direction:column;
+}
+.auth-hero{
+  background:linear-gradient(150deg,var(--gd),var(--gm));
+  padding:60px 32px 36px;flex-shrink:0;text-align:center;
+}
+.auth-logo{font-size:38px;margin-bottom:10px;}
+.auth-brand{font-size:28px;font-weight:900;color:#fff;letter-spacing:-0.5px;}
+.auth-tagline{font-size:13px;color:rgba(255,255,255,0.5);font-weight:600;margin-top:4px;}
+.auth-body{flex:1;padding:28px 24px;overflow-y:auto;}
+.auth-body::-webkit-scrollbar{display:none;}
+.auth-tabs{display:flex;gap:0;margin-bottom:24px;border-radius:12px;overflow:hidden;border:1.5px solid var(--bdr);}
+.auth-tab{flex:1;padding:11px;text-align:center;font-size:13px;font-weight:800;cursor:pointer;background:var(--w);color:var(--mut);border:none;font-family:'Nunito',sans-serif;transition:all 0.2s;}
+.auth-tab.on{background:var(--gm);color:#fff;}
+.auth-field-group{display:flex;flex-direction:column;gap:10px;margin-bottom:16px;}
+.auth-label{font-size:10px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:2px;}
+.auth-input{
+  width:100%;padding:13px 16px;border:1.5px solid var(--bdr);
+  border-radius:12px;font-size:14px;font-family:'Nunito',sans-serif;
+  outline:none;background:var(--w);color:var(--txt);transition:border 0.2s;
+}
+.auth-input:focus{border-color:var(--gm);}
+.auth-row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.auth-btn{
+  width:100%;padding:16px;background:var(--gm);color:#fff;
+  border:none;border-radius:14px;font-size:15px;font-weight:800;
+  cursor:pointer;font-family:'Nunito',sans-serif;transition:all 0.2s;
+  margin-bottom:12px;
+}
+.auth-btn:hover{background:var(--gd);}
+.auth-btn:disabled{opacity:0.6;cursor:not-allowed;}
+.auth-divider{text-align:center;font-size:11px;color:var(--mut);font-weight:700;margin:4px 0 12px;position:relative;}
+.auth-divider::before,.auth-divider::after{content:'';position:absolute;top:50%;width:38%;height:1px;background:var(--bdr);}
+.auth-divider::before{left:0;}.auth-divider::after{right:0;}
+.auth-google{
+  width:100%;padding:13px;background:var(--w);color:var(--txt);
+  border:1.5px solid var(--bdr);border-radius:14px;font-size:14px;font-weight:800;
+  cursor:pointer;font-family:'Nunito',sans-serif;display:flex;align-items:center;justify-content:center;gap:8px;
+  transition:all 0.2s;
+}
+.auth-google:hover{border-color:var(--gm);background:var(--gp);}
+.auth-err{font-size:12px;color:var(--red);font-weight:700;text-align:center;min-height:18px;margin-bottom:4px;}
+
+/* App visibility */
+#appRoot{display:none;}
+#appRoot.visible{display:block;}
+
+.device-wrap{width:100%;max-width:390px;display:flex;flex-direction:column;align-items:center;gap:14px;}
+.device-label{font-size:11px;font-weight:800;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.12em;align-self:flex-start;}
+
+/* ── PHONE ── */
+.phone{
+  width:100%;background:var(--bg);border-radius:44px;overflow:hidden;
+  box-shadow:0 0 0 10px #1a1a1a,0 0 0 11px #333,0 30px 80px rgba(0,0,0,0.45);
+  position:relative;min-height:820px;display:flex;flex-direction:column;
+}
+.notch{position:absolute;top:0;left:50%;transform:translateX(-50%);width:120px;height:34px;background:#1a1a1a;border-radius:0 0 20px 20px;z-index:100;}
+.sbar{height:50px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 8px;font-size:12px;font-weight:800;position:relative;z-index:10;flex-shrink:0;}
+
+/* ── SCREENS ── */
+.screen{display:none;flex-direction:column;flex:1;animation:si 0.25s ease;}
+.screen.active{display:flex;}
+@keyframes si{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:translateX(0)}}
+
+/* ── BOTTOM NAV ── */
+.bnav{display:flex;background:var(--w);border-top:1px solid var(--bdr);padding:8px 0 28px;flex-shrink:0;position:relative;z-index:20;}
+.bni{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;padding:6px 4px;transition:all 0.2s;}
+.bni-ico{font-size:20px;transition:transform 0.2s;}
+.bni:hover .bni-ico{transform:scale(1.15);}
+.bni-lbl{font-size:9px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:0.05em;transition:color 0.2s;}
+.bni.on .bni-lbl{color:var(--gm);}
+.bni.on .bni-ico{filter:drop-shadow(0 2px 4px rgba(45,106,79,0.3));}
+
+/* PAGE 1 — HOME */
+#pg-home{background:var(--bg);}
+.home-hero{background:linear-gradient(150deg,var(--gd) 0%,var(--gm) 100%);padding:12px 22px 28px;border-radius:0 0 32px 32px;position:relative;overflow:hidden;flex-shrink:0;}
+.home-hero::after{content:'';position:absolute;top:-60px;right:-60px;width:200px;height:200px;border-radius:50%;background:rgba(116,198,157,0.08);}
+.home-hero::before{content:'';position:absolute;bottom:-30px;left:-30px;width:140px;height:140px;border-radius:50%;background:rgba(255,255,255,0.04);}
+.h-sbar{color:rgba(255,255,255,0.35);}
+.h-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;position:relative;z-index:1;}
+.h-greet{font-size:13px;color:rgba(255,255,255,0.5);font-weight:600;}
+.h-name{font-size:22px;font-weight:900;color:#fff;letter-spacing:-0.3px;}
+.h-notif{width:38px;height:38px;border-radius:12px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;position:relative;}
+.h-notif-dot{position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:#F6AD55;border:2px solid var(--gm);}
+.streak-row{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.14);border-radius:16px;padding:13px 16px;display:flex;align-items:center;gap:12px;position:relative;z-index:1;}
+.streak-ico{font-size:26px;}
+.streak-info strong{display:block;font-size:17px;font-weight:900;color:#fff;}
+.streak-info span{font-size:11px;color:rgba(255,255,255,0.45);}
+.streak-chip{margin-left:auto;background:#F6AD55;color:#7B341E;font-size:10px;font-weight:800;padding:4px 10px;border-radius:100px;}
+.home-body{flex:1;overflow-y:auto;padding:18px 18px 4px;}
+.home-body::-webkit-scrollbar{display:none;}
+.sec-lbl{font-size:11px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;}
+.pain-banner{background:var(--w);border:1px solid #FBD38D;border-left:4px solid var(--gold);border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:10px;margin-bottom:16px;cursor:pointer;transition:transform 0.2s;}
+.pain-banner:hover{transform:scale(0.99);}
+.pain-banner strong{display:block;font-size:13px;font-weight:800;color:var(--gold);}
+.pain-banner span{font-size:11px;color:#B7791F;}
+.rx-card{background:var(--w);border-radius:20px;padding:18px;margin-bottom:16px;box-shadow:0 2px 16px rgba(45,106,79,0.08);cursor:pointer;transition:transform 0.2s;}
+.rx-card:hover{transform:translateY(-2px);}
+.rx-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;}
+.rx-title{font-size:16px;font-weight:900;color:var(--txt);margin-bottom:2px;}
+.rx-sub{font-size:11px;color:var(--mut);font-weight:600;}
+.rx-chip{font-size:10px;font-weight:800;padding:4px 10px;border-radius:100px;background:var(--gp);color:var(--gm);}
+.rx-list{display:flex;flex-direction:column;gap:7px;margin-bottom:14px;}
+.rx-row{display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--bg);border-radius:11px;}
+.rx-ico{width:30px;height:30px;border-radius:8px;background:var(--gp);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;}
+.rx-rn{font-size:12.5px;font-weight:800;color:var(--txt);}
+.rx-rd{font-size:10px;color:var(--mut);}
+.rx-st{margin-left:auto;font-size:15px;}
+.btn-go{width:100%;padding:15px;background:var(--gm);color:#fff;border:none;border-radius:13px;font-size:14px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;transition:all 0.2s;}
+.btn-go:hover{background:var(--gd);}
+.mini-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}
+.mstat{background:var(--w);border-radius:14px;padding:14px;box-shadow:0 1px 6px rgba(0,0,0,0.04);}
+.mstat-n{font-size:26px;font-weight:900;color:var(--txt);line-height:1;margin-bottom:3px;}
+.mstat-l{font-size:10px;color:var(--mut);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;}
+.mstat-t{font-size:11px;font-weight:700;color:var(--gl);margin-top:3px;}
+.upcoming-card{background:var(--w);border-radius:16px;padding:16px;box-shadow:0 1px 8px rgba(0,0,0,0.04);margin-bottom:16px;}
+.up-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--bdr);}
+.up-row:last-child{border-bottom:none;padding-bottom:0;}
+.up-day{width:42px;height:42px;border-radius:10px;background:var(--gp);display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0;}
+.up-day-n{font-size:16px;font-weight:900;color:var(--gm);line-height:1;}
+.up-day-l{font-size:8px;font-weight:800;color:var(--gl);text-transform:uppercase;}
+.up-info{flex:1;}
+.up-title{font-size:13px;font-weight:800;color:var(--txt);}
+.up-sub{font-size:11px;color:var(--mut);}
+.up-badge{font-size:10px;font-weight:800;padding:3px 9px;border-radius:100px;}
+.up-badge.physio{background:#EFF6FF;color:#1D4ED8;}
+.up-badge.ai{background:var(--gp);color:var(--gm);}
+
+/* PAGE 2 — PROGRESS */
+#pg-progress{background:var(--bg);}
+.prog-header{background:var(--w);padding:14px 22px 20px;border-bottom:1px solid var(--bdr);flex-shrink:0;}
+.prog-header-title{font-size:22px;font-weight:900;color:var(--txt);margin-bottom:2px;}
+.prog-header-sub{font-size:12px;color:var(--mut);}
+.prog-body{flex:1;overflow-y:auto;padding:16px 18px 4px;}
+.prog-body::-webkit-scrollbar{display:none;}
+.week-sel{display:flex;gap:6px;margin-bottom:18px;overflow-x:auto;padding-bottom:4px;}
+.week-sel::-webkit-scrollbar{display:none;}
+.wk-btn{flex-shrink:0;padding:7px 14px;border-radius:100px;font-size:12px;font-weight:800;border:1.5px solid var(--bdr);background:var(--w);color:var(--mut);cursor:pointer;font-family:'Nunito',sans-serif;transition:all 0.2s;}
+.wk-btn.on{background:var(--gm);border-color:var(--gm);color:#fff;}
+.chart-card{background:var(--w);border-radius:18px;padding:18px;box-shadow:0 2px 12px rgba(45,106,79,0.07);margin-bottom:14px;}
+.chart-title{font-size:14px;font-weight:900;color:var(--txt);margin-bottom:4px;}
+.chart-sub{font-size:11px;color:var(--mut);margin-bottom:16px;}
+.bar-chart{width:100%;height:120px;display:flex;align-items:flex-end;gap:6px;margin-bottom:8px;}
+.bar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;}
+.bar{width:100%;border-radius:6px 6px 0 0;background:linear-gradient(180deg,var(--glt),var(--gm));transition:height 0.8s cubic-bezier(0.4,0,0.2,1);position:relative;cursor:pointer;}
+.bar:hover{filter:brightness(1.1);}
+.bar-val{font-size:9px;font-weight:800;color:var(--gm);text-align:center;}
+.bar-day{font-size:9px;font-weight:700;color:var(--mut);text-align:center;}
+.chart-legend{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--mut);}
+.leg-dot{width:8px;height:8px;border-radius:50%;background:var(--glt);}
+.quality-timeline{background:var(--w);border-radius:18px;padding:18px;box-shadow:0 2px 12px rgba(45,106,79,0.07);margin-bottom:14px;}
+.qt-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--bdr);}
+.qt-row:last-child{border-bottom:none;}
+.qt-date{font-size:11px;font-weight:700;color:var(--mut);width:52px;flex-shrink:0;}
+.qt-bar-wrap{flex:1;height:8px;background:var(--bg);border-radius:100px;overflow:hidden;}
+.qt-bar{height:100%;border-radius:100px;background:linear-gradient(90deg,var(--glt),var(--gm));}
+.qt-val{font-size:12px;font-weight:900;color:var(--gm);width:36px;text-align:right;flex-shrink:0;}
+.qt-flag{font-size:11px;flex-shrink:0;}
+.achieve-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;}
+.achieve-card{background:var(--w);border-radius:14px;padding:14px 10px;text-align:center;box-shadow:0 1px 6px rgba(0,0,0,0.04);}
+.achieve-ico{font-size:28px;margin-bottom:6px;}
+.achieve-name{font-size:10px;font-weight:800;color:var(--txt);line-height:1.3;}
+.achieve-sub{font-size:9px;color:var(--mut);margin-top:2px;}
+.achieve-card.locked{opacity:0.4;}
+.summary-row{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--bdr);border-radius:16px;overflow:hidden;margin-bottom:14px;}
+.sum-box{background:var(--w);padding:14px 10px;text-align:center;}
+.sum-n{font-size:20px;font-weight:900;color:var(--txt);}
+.sum-l{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;}
+
+/* PAGE 3 — MY PHYSIO */
+#pg-physio{background:var(--bg);}
+.physio-hero{background:linear-gradient(150deg,var(--gd),var(--gm));padding:14px 22px 32px;flex-shrink:0;border-radius:0 0 32px 32px;}
+.ph-sbar{color:rgba(255,255,255,0.35);}
+.physio-card-main{background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.18);border-radius:20px;padding:18px;display:flex;align-items:center;gap:14px;}
+.physio-avatar{width:64px;height:64px;border-radius:18px;background:linear-gradient(135deg,var(--glt),var(--gm));display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;border:2px solid rgba(255,255,255,0.3);}
+.physio-name{font-size:18px;font-weight:900;color:#fff;margin-bottom:2px;}
+.physio-qual{font-size:11px;color:rgba(255,255,255,0.55);margin-bottom:8px;}
+.physio-verified{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,0.15);border-radius:100px;padding:3px 10px;font-size:10px;font-weight:800;color:rgba(255,255,255,0.85);}
+.physio-body{flex:1;overflow-y:auto;padding:18px 18px 4px;}
+.physio-body::-webkit-scrollbar{display:none;}
+.appt-card{background:var(--w);border-radius:18px;padding:18px;box-shadow:0 2px 12px rgba(45,106,79,0.08);margin-bottom:14px;}
+.appt-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+.appt-label{font-size:11px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:0.08em;}
+.appt-chip{font-size:10px;font-weight:800;padding:4px 10px;border-radius:100px;background:#EFF6FF;color:#1D4ED8;}
+.appt-time-row{display:flex;align-items:center;gap:14px;margin-bottom:14px;}
+.appt-date-box{background:var(--gp);border-radius:12px;padding:10px 14px;text-align:center;flex-shrink:0;}
+.appt-month{font-size:9px;font-weight:800;color:var(--gm);text-transform:uppercase;letter-spacing:0.08em;}
+.appt-day-n{font-size:24px;font-weight:900;color:var(--gd);line-height:1;}
+.appt-session-name{font-size:14px;font-weight:900;color:var(--txt);margin-bottom:3px;}
+.appt-time{font-size:12px;color:var(--mut);}
+.appt-loc{font-size:12px;color:var(--sub);font-weight:600;}
+.appt-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.appt-btn{padding:11px;border-radius:11px;font-size:12px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;border:none;transition:all 0.2s;}
+.appt-btn.outline{background:var(--bg);color:var(--gm);border:1.5px solid var(--bdr);}
+.appt-btn.filled{background:var(--gm);color:#fff;}
+.msg-card{background:var(--w);border-radius:18px;padding:18px;box-shadow:0 2px 12px rgba(45,106,79,0.07);margin-bottom:14px;}
+.msg-thread{display:flex;flex-direction:column;gap:10px;margin-bottom:14px;}
+.msg-bubble{max-width:75%;padding:10px 14px;border-radius:16px;font-size:12.5px;line-height:1.5;}
+.msg-bubble.physio{background:var(--gp);color:var(--gd);border-radius:4px 16px 16px 16px;align-self:flex-start;font-weight:600;}
+.msg-bubble.patient{background:var(--gm);color:#fff;border-radius:16px 4px 16px 16px;align-self:flex-end;font-weight:600;}
+.msg-time{font-size:9px;color:var(--mut);font-weight:700;margin-top:2px;}
+.msg-time.right{text-align:right;}
+.msg-input-row{display:flex;gap:8px;align-items:center;}
+.msg-input{flex:1;padding:10px 14px;border:1.5px solid var(--bdr);border-radius:100px;font-size:13px;font-family:'Nunito',sans-serif;outline:none;background:var(--bg);color:var(--txt);}
+.msg-input:focus{border-color:var(--gm);}
+.msg-send{width:38px;height:38px;border-radius:50%;background:var(--gm);border:none;color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.note-card{background:linear-gradient(135deg,#F0FFF4,#E6FFED);border:1.5px solid #9AE6B4;border-radius:16px;padding:16px;margin-bottom:14px;}
+.note-header{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+.note-title{font-size:13px;font-weight:900;color:var(--gd);}
+.note-date{font-size:10px;color:var(--gl);margin-left:auto;font-weight:700;}
+.note-body{font-size:12.5px;color:#276749;line-height:1.65;}
+.physio-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;}
+.pstat{background:var(--w);border-radius:12px;padding:12px 8px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.04);}
+.pstat-n{font-size:18px;font-weight:900;color:var(--txt);}
+.pstat-l{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;line-height:1.3;margin-top:2px;}
+
+/* PAGE 4 — PROFILE */
+#pg-profile{background:var(--bg);}
+.profile-hero{background:var(--w);padding:14px 22px 20px;border-bottom:1px solid var(--bdr);flex-shrink:0;}
+.profile-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.profile-title{font-size:22px;font-weight:900;color:var(--txt);}
+.edit-btn{font-size:13px;font-weight:800;color:var(--gm);background:var(--gp);border:none;border-radius:100px;padding:5px 14px;cursor:pointer;font-family:'Nunito',sans-serif;}
+.profile-card{display:flex;align-items:center;gap:14px;}
+.profile-ava{width:54px;height:54px;border-radius:18px;background:linear-gradient(135deg,var(--glt),var(--gm));display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;}
+.profile-name{font-size:18px;font-weight:900;color:var(--txt);margin-bottom:2px;}
+.profile-joined{font-size:11px;color:var(--mut);}
+.profile-condition{font-size:11px;color:var(--gl);font-weight:700;margin-top:3px;}
+.profile-body{flex:1;overflow-y:auto;padding:16px 18px 4px;}
+.profile-body::-webkit-scrollbar{display:none;}
+.recovery-card{background:var(--w);border-radius:18px;padding:18px;box-shadow:0 2px 12px rgba(45,106,79,0.07);margin-bottom:14px;display:flex;align-items:center;gap:16px;}
+.ring-wrap{position:relative;width:80px;height:80px;flex-shrink:0;}
+.ring-label{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.ring-pct{font-size:16px;font-weight:900;color:var(--gm);}
+.ring-sub{font-size:9px;color:var(--mut);font-weight:700;}
+.recovery-title{font-size:15px;font-weight:900;color:var(--txt);margin-bottom:4px;}
+.recovery-sub{font-size:12px;color:var(--mut);line-height:1.5;}
+.info-section{background:var(--w);border-radius:18px;padding:18px;box-shadow:0 1px 6px rgba(0,0,0,0.04);margin-bottom:14px;}
+.info-section-title{font-size:12px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:12px;}
+.info-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--bdr);}
+.info-row:last-child{border-bottom:none;}
+.info-key{font-size:12.5px;color:var(--mut);font-weight:600;}
+.info-val{font-size:12.5px;font-weight:800;color:var(--txt);}
+.settings-list{background:var(--w);border-radius:18px;padding:8px 18px;box-shadow:0 1px 6px rgba(0,0,0,0.04);margin-bottom:14px;}
+.setting-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--bdr);}
+.setting-row:last-child{border-bottom:none;}
+.setting-ico{width:32px;height:32px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;}
+.setting-name{flex:1;font-size:13px;font-weight:700;color:var(--txt);}
+.setting-arrow{font-size:18px;color:var(--mut);}
+.toggle{width:44px;height:26px;border-radius:100px;background:var(--gm);position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;}
+.toggle::after{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:transform 0.2s;box-shadow:0 1px 4px rgba(0,0,0,0.2);}
+.toggle.off{background:var(--bdr);}
+.toggle.off::after{transform:translateX(0px);}
+.toggle:not(.off)::after{transform:translateX(18px);}
+.logout-btn{width:100%;padding:15px;background:var(--w);border:1.5px solid #FCA5A5;border-radius:14px;color:var(--red);font-size:14px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;margin-bottom:8px;}
+
+/* PAGE 5 — EXERCISE */
+#pg-exercise{background:var(--bg);}
+.ex-setup{flex:1;overflow-y:auto;padding:0 0 4px;}
+.ex-setup::-webkit-scrollbar{display:none;}
+.pre-ex-header{background:var(--w);padding:14px 22px 18px;border-bottom:1px solid var(--bdr);flex-shrink:0;}
+.pre-ex-back{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--mut);background:none;border:none;cursor:pointer;font-family:'Nunito',sans-serif;margin-bottom:12px;}
+.pre-ex-title{font-size:21px;font-weight:900;color:var(--txt);margin-bottom:2px;}
+.pre-ex-sub{font-size:12px;color:var(--mut);}
+.ex-list{padding:16px 18px;}
+.ex-item{background:var(--w);border-radius:16px;padding:16px;margin-bottom:10px;box-shadow:0 1px 8px rgba(0,0,0,0.05);cursor:pointer;transition:all 0.2s;border:1.5px solid transparent;}
+.ex-item:hover,.ex-item.selected{border-color:var(--gm);background:#F9FFFC;}
+.ex-item-top{display:flex;align-items:center;gap:12px;margin-bottom:10px;}
+.ex-num{width:34px;height:34px;border-radius:10px;background:var(--gp);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:900;color:var(--gm);flex-shrink:0;}
+.ex-item-name{font-size:15px;font-weight:900;color:var(--txt);margin-bottom:2px;}
+.ex-item-detail{font-size:11px;color:var(--mut);}
+.ex-item-status{margin-left:auto;font-size:12px;font-weight:800;padding:4px 10px;border-radius:100px;}
+.ex-item-status.done{background:var(--gp);color:var(--gm);}
+.ex-item-status.next{background:#EFF6FF;color:#1D4ED8;}
+.ex-item-status.todo{background:var(--bg);color:var(--mut);}
+.ex-item-meta{display:flex;gap:8px;}
+.ex-meta-pill{font-size:10px;font-weight:700;padding:3px 9px;border-radius:100px;background:var(--bg);color:var(--mut);}
+.start-session-wrap{padding:0 18px 16px;}
+.btn-start-big{width:100%;padding:18px;background:var(--gm);color:#fff;border:none;border-radius:16px;font-size:16px;font-weight:900;cursor:pointer;font-family:'Nunito',sans-serif;display:flex;align-items:center;justify-content:center;gap:10px;transition:all 0.2s;box-shadow:0 4px 16px rgba(45,106,79,0.3);}
+.btn-start-big:hover{background:var(--gd);}
+
+/* LEG SELECTOR (shown on exercise setup) */
+.leg-selector{display:flex;gap:0;margin:0 18px 14px;}
+.leg-sel-btn{flex:1;padding:12px;background:var(--w);border:1.5px solid var(--bdr);color:var(--mut);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;transition:all 0.2s;}
+.leg-sel-btn:first-child{border-radius:12px 0 0 12px;border-right:none;}
+.leg-sel-btn:last-child{border-radius:0 12px 12px 0;}
+.leg-sel-btn.active{background:var(--gp);border-color:var(--gm);color:var(--gm);}
+
+/* LIVE SESSION OVERLAY */
+.live-overlay{display:none;position:absolute;inset:0;background:var(--gd);z-index:50;flex-direction:column;border-radius:44px;overflow:hidden;}
+.live-overlay.show{display:flex;}
+.live-cam{height:360px;background:#0D2418;position:relative;flex-shrink:0;overflow:hidden;}
+.live-cam-bg{position:absolute;inset:0;background:radial-gradient(ellipse at center,#1a3a24 0%,#0a1a10 100%);}
+
+/* Real camera elements inside live-cam */
+#input_video{display:none;}
+#output_canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+
+/* Corner guides */
+.cam-corner{position:absolute;width:28px;height:28px;border-color:var(--glt);border-style:solid;border-width:0;z-index:5;}
+.cam-corner.tl{top:16px;left:16px;border-top-width:3px;border-left-width:3px;border-radius:4px 0 0 0;}
+.cam-corner.tr{top:16px;right:16px;border-top-width:3px;border-right-width:3px;border-radius:0 4px 0 0;}
+.cam-corner.bl{bottom:16px;left:16px;border-bottom-width:3px;border-left-width:3px;border-radius:0 0 0 4px;}
+.cam-corner.br{bottom:16px;right:16px;border-bottom-width:3px;border-right-width:3px;border-radius:0 0 4px 0;}
+
+/* HUD overlays */
+.hud-tl{position:absolute;top:16px;left:16px;z-index:10;}
+.hud-tr{position:absolute;top:16px;right:16px;z-index:10;}
+.hud-box{background:rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.1);border-radius:13px;padding:10px 14px;backdrop-filter:blur(8px);text-align:center;}
+.hud-val{font-family:'Roboto Mono',monospace;font-size:26px;font-weight:500;color:#fff;line-height:1;}
+.hud-val.green{color:#68D391;}
+.hud-lbl{font-size:9px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.08em;margin-top:2px;}
+
+/* AI feedback strip */
+.ai-strip{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.8));padding:24px 18px 12px;z-index:10;}
+.ai-msg{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#fff;}
+.ai-pulse{width:8px;height:8px;border-radius:50%;background:#68D391;animation:ap 1.5s infinite;flex-shrink:0;}
+@keyframes ap{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.3;transform:scale(0.6)}}
+
+/* Calibration bar inside live overlay */
+.cal-overlay-inner{
+  position:absolute;inset:0;z-index:20;
+  background:rgba(10,26,16,0.88);
+  display:none;flex-direction:column;
+  align-items:center;justify-content:center;
+  padding:24px;text-align:center;
+  backdrop-filter:blur(4px);
+}
+.cal-overlay-inner.active{display:flex;}
+.cal-title{font-size:16px;font-weight:900;color:#68D391;margin-bottom:8px;letter-spacing:0.04em;}
+.cal-inst{font-size:12px;color:rgba(255,255,255,0.7);margin-bottom:16px;line-height:1.6;}
+.cal-status-box{font-family:'Roboto Mono',monospace;font-size:12px;padding:8px 16px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:rgba(255,255,255,0.6);margin-bottom:10px;}
+.cal-status-box.good{border-color:#68D391;color:#68D391;background:rgba(104,211,145,0.1);}
+.cal-status-box.bad{border-color:#F6AD55;color:#F6AD55;background:rgba(246,173,85,0.1);}
+.cal-timer-big{font-family:'Roboto Mono',monospace;font-size:40px;font-weight:900;color:#fff;margin-bottom:10px;}
+.cal-progress-bar-wrap{width:100%;height:5px;background:rgba(255,255,255,0.1);border-radius:100px;overflow:hidden;margin-bottom:8px;}
+.cal-progress-bar-fill{height:100%;background:#68D391;width:0%;transition:width 0.1s linear;}
+.cal-hint-txt{font-size:10px;color:rgba(255,255,255,0.35);}
+.cal-angle-txt{font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;font-family:'Roboto Mono',monospace;}
+
+/* Live panel */
+.live-panel{flex:1;padding:14px 18px;overflow:hidden;}
+.live-ex-name{font-size:17px;font-weight:900;color:#fff;margin-bottom:3px;}
+.live-prog-txt{font-size:12px;color:rgba(255,255,255,0.35);margin-bottom:12px;}
+.prog-track{height:5px;background:rgba(255,255,255,0.1);border-radius:100px;overflow:hidden;margin-bottom:16px;}
+.prog-fill{height:100%;border-radius:100px;background:var(--glt);transition:width 0.5s;}
+.qual-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;}
+.qb{background:rgba(255,255,255,0.06);border-radius:12px;padding:10px 6px;text-align:center;}
+.qb-v{font-size:16px;font-weight:900;color:#fff;margin-bottom:2px;}
+.qb-v.g{color:#68D391;}.qb-v.w{color:#F6AD55;}
+.qb-l{font-size:9px;color:rgba(255,255,255,0.3);text-transform:uppercase;letter-spacing:0.05em;}
+.live-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.live-btn{padding:13px;border-radius:13px;font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;border:none;transition:all 0.2s;}
+.live-btn.pause{background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);}
+.live-btn.end{background:rgba(220,38,38,0.15);color:#FC8181;border:1px solid rgba(220,38,38,0.3);}
+
+/* Session complete overlay */
+.complete-overlay{display:none;position:absolute;inset:0;background:var(--w);z-index:60;flex-direction:column;border-radius:44px;overflow:hidden;}
+.complete-overlay.show{display:flex;}
+.comp-top{background:linear-gradient(135deg,#F0FFF4,#C6F6D5);padding:44px 28px 32px;display:flex;flex-direction:column;align-items:center;text-align:center;border-radius:0 0 36px 36px;flex-shrink:0;}
+.comp-check{width:72px;height:72px;background:var(--gm);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:30px;margin-bottom:14px;box-shadow:0 8px 24px rgba(45,106,79,0.3);color:#fff;font-weight:900;}
+.comp-title{font-size:25px;font-weight:900;color:var(--gd);margin-bottom:4px;}
+.comp-sub{font-size:13px;color:var(--gl);}
+.comp-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--bdr);width:100%;margin-top:20px;border-radius:14px;overflow:hidden;}
+.cs{background:#fff;padding:13px 6px;text-align:center;}
+.cs-v{font-size:20px;font-weight:900;color:var(--txt);}
+.cs-l{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;}
+.comp-body{flex:1;overflow-y:auto;padding:20px 20px;}
+.comp-body::-webkit-scrollbar{display:none;}
+.ai-summary{background:var(--bg);border-radius:13px;padding:14px;margin-bottom:14px;}
+.ai-sum-lbl{font-size:10px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:8px;}
+.ai-sum-body{font-size:12.5px;color:#374151;line-height:1.75;}
+.physio-notif{background:#F0FFF4;border:1px solid #9AE6B4;border-radius:13px;padding:13px;display:flex;align-items:flex-start;gap:10px;margin-bottom:14px;}
+.pn-av{width:32px;height:32px;border-radius:50%;background:var(--gm);display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;flex-shrink:0;}
+.pn-t strong{display:block;font-size:12px;font-weight:800;color:var(--gd);margin-bottom:2px;}
+.pn-t span{font-size:11px;color:var(--gl);line-height:1.4;}
+.comp-footer{padding:0 20px 28px;flex-shrink:0;}
+.btn-done{width:100%;padding:16px;background:var(--gm);color:#fff;border:none;border-radius:14px;font-size:15px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;}
+
+/* Email report section in complete overlay */
+.email-row{display:flex;gap:8px;margin-top:10px;}
+.email-inp{flex:1;padding:10px 14px;border:1.5px solid var(--bdr);border-radius:100px;font-size:13px;font-family:'Nunito',sans-serif;outline:none;background:var(--bg);color:var(--txt);}
+.email-inp:focus{border-color:var(--gm);}
+.email-send-btn{padding:10px 16px;background:var(--gm);color:#fff;border:none;border-radius:100px;font-size:12px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;white-space:nowrap;}
+.email-status{font-size:11px;color:var(--mut);text-align:center;margin-top:6px;}
+
+/* Floating warning banners (from index.html) */
+.float-warning{
+  position:absolute;top:60px;left:50%;
+  transform:translateX(-50%) translateY(-80px);
+  background:rgba(246,173,85,0.15);border:1px solid #F6AD55;
+  padding:10px 16px;z-index:80;opacity:0;
+  transition:all 0.3s;pointer-events:none;
+  border-radius:10px;text-align:center;width:85%;
+}
+.float-warning.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.float-warning-txt{font-size:12px;font-weight:800;color:#F6AD55;letter-spacing:0.04em;}
+.float-warning-sub{font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px;}
+</style>
+</head>
+<body>
+
+<!-- ══ VERIFY EMAIL SCREEN ══ -->
+<div id="verifyScreen">
+  <div class="verify-phone">
+    <div class="verify-ico">📬</div>
+    <div class="verify-title">Check your email</div>
+    <div class="verify-sub">We sent a verification link to:</div>
+    <div class="verify-email-show" id="verifyEmailAddr">your@email.com</div>
+    <div class="verify-steps">
+      <div class="verify-step"><div class="verify-step-num">1</div><div>Open your email inbox — check spam if you don't see it within 1 minute</div></div>
+      <div class="verify-step"><div class="verify-step-num">2</div><div>Click the <strong>Confirm your email</strong> link in the Healify email</div></div>
+      <div class="verify-step"><div class="verify-step-num">3</div><div>Come back here and sign in with your email and password</div></div>
+    </div>
+    <button class="verify-resend" id="resendBtn" onclick="resendVerification()">Didn't get it? Resend email</button>
+    <div style="font-size:11px;color:var(--mut);margin-top:6px" id="resendStatus"></div>
+    <button class="verify-back" onclick="hideVerifyScreen()">← Back to Sign In</button>
+  </div>
+</div>
+
+<!-- ══ AUTH SCREEN ══ -->
+<div id="authScreen">
+  <div class="auth-phone">
+    <div class="auth-hero">
+      <div class="auth-logo">💚</div>
+      <div class="auth-brand">Healify</div>
+      <div class="auth-tagline">AI-Powered Knee Rehab</div>
+    </div>
+    <div class="auth-body">
+      <div class="auth-tabs">
+        <button class="auth-tab on" id="tabLogin" onclick="switchAuthTab('login')">Sign In</button>
+        <button class="auth-tab" id="tabRegister" onclick="switchAuthTab('register')">Register</button>
+      </div>
+
+      <!-- LOGIN FORM -->
+      <div id="loginForm">
+        <div class="auth-field-group">
+          <div>
+            <div class="auth-label">Email</div>
+            <input class="auth-input" id="loginEmail" type="email" placeholder="you@email.com">
+          </div>
+          <div>
+            <div class="auth-label">Password</div>
+            <input class="auth-input" id="loginPass" type="password" placeholder="••••••••">
+          </div>
+        </div>
+        <div class="auth-err" id="loginErr"></div>
+        <button class="auth-btn" id="loginBtn" onclick="doLogin()">Sign In →</button>
+        <div class="auth-divider">or</div>
+        <button class="auth-google" onclick="doGoogleLogin()">
+          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20H24v8h11.3C33.6 33.2 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34.1 6.5 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20c11 0 19.6-7.9 19.6-20 0-1.3-.1-2.7-.4-4z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 15.1 18.9 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34.1 6.5 29.3 4 24 4 16.3 4 9.7 8.4 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-1.9 13.5-5L31.8 34c-2.1 1.4-4.7 2.2-7.8 2.2-5.2 0-9.6-3.5-11.2-8.3l-6.5 5C9.5 39.4 16.3 44 24 44z"/><path fill="#1976D2" d="M43.6 20H24v8h11.3c-.8 2.2-2.2 4-4.1 5.3L37.5 39C41.5 35.3 44 30 44 24c0-1.3-.1-2.7-.4-4z"/></svg>
+          Continue with Google
+        </button>
+      </div>
+
+      <!-- REGISTER FORM -->
+      <div id="registerForm" style="display:none">
+        <div class="auth-field-group">
+          <div>
+            <div class="auth-label">Full Name</div>
+            <input class="auth-input" id="regName" type="text" placeholder="Rahul Sharma">
+          </div>
+          <div class="auth-row2">
+            <div>
+              <div class="auth-label">Age</div>
+              <input class="auth-input" id="regAge" type="number" placeholder="38">
+            </div>
+            <div>
+              <div class="auth-label">City</div>
+              <input class="auth-input" id="regCity" type="text" placeholder="Bengaluru">
+            </div>
+          </div>
+          <div>
+            <div class="auth-label">Condition / Surgery</div>
+            <input class="auth-input" id="regCondition" type="text" placeholder="TKR — Right Knee">
+          </div>
+          <div>
+            <div class="auth-label">Email</div>
+            <input class="auth-input" id="regEmail" type="email" placeholder="you@email.com">
+          </div>
+          <div class="auth-row2">
+            <div>
+              <div class="auth-label">Surgeon Name</div>
+              <input class="auth-input" id="regSurgeon" type="text" placeholder="Dr. Arun Nair">
+            </div>
+            <div>
+              <div class="auth-label">Surgery Date</div>
+              <input class="auth-input" id="regSurgeryDate" type="date">
+            </div>
+          </div>
+          <div>
+            <div class="auth-label">Plan Duration (days)</div>
+            <input class="auth-input" id="regPlanDays" type="number" placeholder="30" value="30">
+          </div>
+          <div>
+            <div class="auth-label">Password (min 6 chars)</div>
+            <input class="auth-input" id="regPass" type="password" placeholder="••••••••">
+          </div>
+        </div>
+        <div class="auth-err" id="registerErr"></div>
+        <button class="auth-btn" id="registerBtn" onclick="doRegister()">Create Account →</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ══ MAIN APP ══ -->
+<div id="appRoot">
+
+<div class="device-label">Healify · Live AI Rehab</div>
+
+<div class="phone" id="phone">
+  <div class="notch"></div>
+
+  <!-- ══ PAGE 1: HOME ══ -->
+  <div class="screen active" id="pg-home">
+    <div class="home-hero">
+      <div class="sbar h-sbar"><span>9:41</span><div style="display:flex;gap:4px;font-size:11px">📶 🔋</div></div>
+      <div class="h-top">
+        <div>
+          <div class="h-greet">Good morning,</div>
+          <div class="h-name" id="h-name-txt">Rahul 👋</div>
+        </div>
+        <div class="h-notif">🔔<div class="h-notif-dot"></div></div>
+      </div>
+      <div class="streak-row">
+        <div class="streak-ico">🔥</div>
+        <div class="streak-info">
+          <strong id="homeStreakNum">— Streak</strong>
+          <span id="homeStreakSub">Loading…</span>
+        </div>
+        <div class="streak-chip" id="homeStreakChip">—</div>
+      </div>
+    </div>
+    <div class="home-body">
+      <div class="pain-banner" style="margin-top:2px">
+        <span style="font-size:20px">😐</span>
+        <div><strong>Pain check before session</strong><span>Tap to rate your pain level today</span></div>
+        <span style="margin-left:auto;color:var(--gold);font-size:20px">›</span>
+      </div>
+      <div class="sec-lbl">Today's Prescription</div>
+      <div class="rx-card" onclick="goEx()">
+        <div class="rx-top">
+          <div><div class="rx-title" id="rxTitle">Today's Session</div><div class="rx-sub" id="rxPhysioSub">Loading…</div></div>
+          <span class="rx-chip" id="rxPendingChip">…</span>
+        </div>
+        <div class="rx-list" id="rxExList"><div class="rx-row" style="justify-content:center;color:var(--mut);font-size:12px">Loading prescription…</div></div>
+        <button class="btn-go" onclick="event.stopPropagation();goEx()">Start Session →</button>
+      </div>
+      <div class="sec-lbl">This Week</div>
+      <div class="mini-stats">
+        <div class="mstat"><div class="mstat-n" id="homeBestROM">—°</div><div class="mstat-l">Best ROM</div><div class="mstat-t" id="homeROMTrend">Complete a session</div></div>
+        <div class="mstat"><div class="mstat-n" id="homeAvgQual">—%</div><div class="mstat-l">Avg Quality</div><div class="mstat-t" id="homeQualTrend">Complete a session</div></div>
+      </div>
+      <div class="sec-lbl">Upcoming</div>
+      <div class="upcoming-card" id="upcomingList"><div style="padding:12px;text-align:center;font-size:12px;color:var(--mut)">Loading appointments…</div></div>
+      <div style="height:8px"></div>
+    </div>
+    <div class="bnav">
+      <div class="bni on" onclick="nav('home')"><div class="bni-ico">🏠</div><div class="bni-lbl" style="color:var(--gm)">Home</div></div>
+      <div class="bni" onclick="nav('progress')"><div class="bni-ico">📊</div><div class="bni-lbl">Progress</div></div>
+      <div class="bni" onclick="nav('physio')"><div class="bni-ico">👨‍⚕️</div><div class="bni-lbl">My Physio</div></div>
+      <div class="bni" onclick="nav('profile')"><div class="bni-ico">👤</div><div class="bni-lbl">Profile</div></div>
+    </div>
+  </div>
+
+  <!-- ══ PAGE 2: PROGRESS ══ -->
+  <div class="screen" id="pg-progress">
+    <div class="prog-header">
+      <div class="sbar" style="color:var(--mut);padding:0;height:auto;margin-bottom:12px"><span>9:41</span><div>📶 🔋</div></div>
+      <div class="prog-header-title">Your Progress</div>
+      <div class="prog-header-sub">Knee Replacement Recovery · Started Mar 1</div>
+    </div>
+    <div class="prog-body">
+      <div class="week-sel">
+        <button class="wk-btn on">This Week</button>
+        <button class="wk-btn">Last 2 Weeks</button>
+        <button class="wk-btn">This Month</button>
+        <button class="wk-btn">All Time</button>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Range of Motion (ROM)</div>
+        <div class="chart-sub">Knee flexion angle · Best rep per session</div>
+        <div class="bar-chart" id="barChart"></div>
+        <div class="chart-legend">
+          <div class="leg-dot"></div>
+          <span>Flexion angle · Goal: 120°</span>
+          <span style="margin-left:auto;font-size:11px;font-weight:800;color:var(--gm)" id="romTrend">No sessions yet</span>
+        </div>
+      </div>
+      <div class="summary-row">
+        <div class="sum-box"><div class="sum-n" id="sumSessions">0</div><div class="sum-l">Sessions</div></div>
+        <div class="sum-box"><div class="sum-n" id="sumReps">0</div><div class="sum-l">Total Reps</div></div>
+        <div class="sum-box"><div class="sum-n" id="sumQuality">—%</div><div class="sum-l">Avg Quality</div></div>
+      </div>
+      <div class="quality-timeline" id="qualityTimeline">
+        <div class="sec-lbl" style="margin-bottom:12px">Session Quality Log</div>
+        <div id="qtRows" style="color:var(--mut);font-size:12px;text-align:center;padding:12px 0">No sessions recorded yet. Complete a session to see your history.</div>
+      </div>
+      <div class="sec-lbl">Achievements</div>
+      <div class="achieve-grid">
+        <div class="achieve-card"><div class="achieve-ico">🔥</div><div class="achieve-name">5-Day Streak</div><div class="achieve-sub">Earned today</div></div>
+        <div class="achieve-card"><div class="achieve-ico">🏆</div><div class="achieve-name">First Week</div><div class="achieve-sub">Mar 8</div></div>
+        <div class="achieve-card"><div class="achieve-ico">💪</div><div class="achieve-name">100 Reps</div><div class="achieve-sub">Mar 9</div></div>
+        <div class="achieve-card locked"><div class="achieve-ico">🎯</div><div class="achieve-name">90° ROM</div><div class="achieve-sub" id="romAchieve">—</div></div>
+        <div class="achieve-card locked"><div class="achieve-ico">⭐</div><div class="achieve-name">Perfect Week</div><div class="achieve-sub">Locked</div></div>
+        <div class="achieve-card locked"><div class="achieve-ico">🏅</div><div class="achieve-name">30 Sessions</div><div class="achieve-sub">—</div></div>
+      </div>
+      <div style="height:8px"></div>
+    </div>
+    <div class="bnav">
+      <div class="bni" onclick="nav('home')"><div class="bni-ico">🏠</div><div class="bni-lbl">Home</div></div>
+      <div class="bni on" onclick="nav('progress')"><div class="bni-ico">📊</div><div class="bni-lbl" style="color:var(--gm)">Progress</div></div>
+      <div class="bni" onclick="nav('physio')"><div class="bni-ico">👨‍⚕️</div><div class="bni-lbl">My Physio</div></div>
+      <div class="bni" onclick="nav('profile')"><div class="bni-ico">👤</div><div class="bni-lbl">Profile</div></div>
+    </div>
+  </div>
+
+  <!-- ══ PAGE 3: MY PHYSIO ══ -->
+  <div class="screen" id="pg-physio">
+    <div class="physio-hero">
+      <div class="sbar ph-sbar" style="padding:0;height:auto;margin-bottom:16px"><span>9:41</span><div>📶 🔋</div></div>
+      <div class="physio-card-main">
+        <div class="physio-avatar">👩‍⚕️</div>
+        <div>
+          <div class="physio-name" id="physioDocName">Your Physio</div>
+          <div class="physio-qual" id="physioDocQual">Physiotherapist</div>
+          <div class="physio-verified">✓ Healify Verified</div>
+        </div>
+      </div>
+    </div>
+    <div class="physio-body">
+      <div class="physio-stats" style="margin-top:2px">
+        <div class="pstat"><div class="pstat-n" id="physioSessionsReviewed">—</div><div class="pstat-l">Sessions reviewed</div></div>
+        <div class="pstat"><div class="pstat-n" id="physioRating">—</div><div class="pstat-l">Rating</div></div>
+        <div class="pstat"><div class="pstat-n" id="physioResponseTime">—</div><div class="pstat-l">Avg response</div></div>
+      </div>
+      <div class="appt-card">
+        <div class="appt-top"><div class="appt-label">Next Appointment</div><span class="appt-chip">Confirmed</span></div>
+        <div class="appt-time-row">
+          <div class="appt-date-box"><div class="appt-month" id="apptDateMonth">—</div><div class="appt-day-n" id="apptDateDay">—</div></div>
+          <div class="appt-info">
+            <div class="appt-session-name" id="apptSessionName">No appointment</div>
+            <div class="appt-time" id="apptTime">—</div>
+            <div class="appt-loc" id="apptLoc">—</div>
+          </div>
+        </div>
+        <div class="appt-actions">
+          <button class="appt-btn outline">Reschedule</button>
+          <button class="appt-btn filled">Get Directions</button>
+        </div>
+      </div>
+      <div class="note-card">
+        <div class="note-header"><span style="font-size:16px">📋</span><div class="note-title">Latest Note from Dr. Priya</div><div class="note-date" id="physioNoteDate">—</div></div>
+        <div class="note-body">Great progress this week Rahul! Your ROM is improving faster than expected. I noticed some hip drift in Tuesday's session — focus on keeping your hip square during the leg raise. Otherwise excellent work. Keep up the 5-day streak! 💪</div>
+      </div>
+      <div class="msg-card">
+        <div class="sec-lbl" style="margin-bottom:14px">Messages</div>
+        <div class="msg-thread" id="msgThread"><div style="color:var(--mut);font-size:12px;text-align:center;padding:10px 0">Loading messages…</div></div>
+        <div class="msg-input-row">
+          <input class="msg-input" id="msgInputField" type="text" placeholder="Message your physio…" onkeydown="if(event.key==='Enter')sendMessage()">
+          <button class="msg-send" onclick="sendMessage()">↑</button>
+        </div>
+      </div>
+      <div style="height:8px"></div>
+    </div>
+    <div class="bnav">
+      <div class="bni" onclick="nav('home')"><div class="bni-ico">🏠</div><div class="bni-lbl">Home</div></div>
+      <div class="bni" onclick="nav('progress')"><div class="bni-ico">📊</div><div class="bni-lbl">Progress</div></div>
+      <div class="bni on" onclick="nav('physio')"><div class="bni-ico">👨‍⚕️</div><div class="bni-lbl" style="color:var(--gm)">My Physio</div></div>
+      <div class="bni" onclick="nav('profile')"><div class="bni-ico">👤</div><div class="bni-lbl">Profile</div></div>
+    </div>
+  </div>
+
+  <!-- ══ PAGE 4: PROFILE ══ -->
+  <div class="screen" id="pg-profile">
+    <div class="profile-hero">
+      <div class="sbar" style="color:var(--mut);padding:0;height:auto;margin-bottom:14px"><span>9:41</span><div>📶 🔋</div></div>
+      <div class="profile-top"><div class="profile-title">My Profile</div><button class="edit-btn">Edit</button></div>
+      <div class="profile-card">
+        <div class="profile-ava">👤</div>
+        <div><div class="profile-name" id="profileNameVal">Rahul Sharma</div><div class="profile-joined" id="profileJoinedDate">Member</div><div class="profile-condition" id="profileConditionBadge">🦵 Knee Replacement Recovery</div></div>
+      </div>
+    </div>
+    <div class="profile-body">
+      <div class="recovery-card" style="margin-top:2px">
+        <div class="ring-wrap">
+          <svg width="80" height="80" viewBox="0 0 80 80"><circle cx="40" cy="40" r="32" fill="none" stroke="#E0EBE4" stroke-width="8"/><circle cx="40" cy="40" r="32" fill="none" stroke="var(--gm)" stroke-width="8" stroke-dasharray="201" stroke-dashoffset="201" id="recoveryRingCircle" stroke-linecap="round" transform="rotate(-90 40 40)"/></svg>
+          <div class="ring-label"><div class="ring-pct" id="ringPctTxt">—%</div><div class="ring-sub">Done</div></div>
+        </div>
+        <div class="recovery-info">
+          <div class="recovery-title" id="recoveryTitle">Recovery Progress</div>
+          <div class="recovery-sub" id="recoverySubTxt" style="white-space:pre-line">Loading…</div>
+          <div style="margin-top:8px;font-size:11px;font-weight:800;color:var(--gm)" id="recoveryTrend">—</div>
+        </div>
+      </div>
+      <div class="info-section">
+        <div class="info-section-title">Personal Information</div>
+        <div class="info-row"><span class="info-key">Full Name</span><span class="info-val" id="profileNameVal2">Rahul Sharma</span></div>
+        <div class="info-row"><span class="info-key">Age</span><span class="info-val" id="profileAgeVal">38 years</span></div>
+        <div class="info-row"><span class="info-key">Phone</span><span class="info-val">+91 98765 43210</span></div>
+        <div class="info-row"><span class="info-key">City</span><span class="info-val" id="profileCityVal">Bengaluru</span></div>
+        <div class="info-row"><span class="info-key">Weight</span><span class="info-val">74 kg</span></div>
+      </div>
+      <div class="info-section">
+        <div class="info-section-title">Medical Information</div>
+        <div class="info-row"><span class="info-key">Condition</span><span class="info-val" id="profileConditionVal">TKR — Right Knee</span></div>
+        <div class="info-row"><span class="info-key">Surgery Date</span><span class="info-val" id="profileSurgeryDateVal">—</span></div>
+        <div class="info-row"><span class="info-key">Surgeon</span><span class="info-val" id="profileSurgeonVal">—</span></div>
+        <div class="info-row"><span class="info-key">Plan Duration</span><span class="info-val" id="profilePlanVal">30 days</span></div>
+        <div class="info-row"><span class="info-key">Sessions Done</span><span class="info-val" id="profileSessions" style="color:var(--gm)">0</span></div>
+      </div>
+      <div class="settings-list">
+        <div class="setting-row"><div class="setting-ico" style="background:var(--gp)">🔔</div><div class="setting-name">Session Reminders</div><div class="toggle"></div></div>
+        <div class="setting-row"><div class="setting-ico" style="background:#EFF6FF">💬</div><div class="setting-name">WhatsApp Notifications</div><div class="toggle"></div></div>
+        <div class="setting-row">
+          <div class="setting-ico" style="background:#FFF7ED">🔊</div>
+          <div class="setting-name">Voice Feedback (AI)</div>
+          <div class="toggle" id="voiceToggleUI" onclick="toggleVoiceFromUI()"></div>
+        </div>
+        <div class="setting-row"><div class="setting-ico" style="background:var(--gp)">🌐</div><div class="setting-name">Language</div><span class="info-val" style="font-size:12px;margin-right:8px">English</span><div class="setting-arrow">›</div></div>
+      </div>
+      <button class="logout-btn" id="profileLogoutBtn" onclick="signOutUser()">Sign Out</button>
+      <div style="text-align:center;font-size:11px;color:var(--mut);margin-bottom:8px">Healify v2.0 · AI-Powered Rehab · Stand. Walk. Recover.</div>
+      <div style="height:4px"></div>
+    </div>
+    <div class="bnav">
+      <div class="bni" onclick="nav('home')"><div class="bni-ico">🏠</div><div class="bni-lbl">Home</div></div>
+      <div class="bni" onclick="nav('progress')"><div class="bni-ico">📊</div><div class="bni-lbl">Progress</div></div>
+      <div class="bni" onclick="nav('physio')"><div class="bni-ico">👨‍⚕️</div><div class="bni-lbl">My Physio</div></div>
+      <div class="bni on" onclick="nav('profile')"><div class="bni-ico">👤</div><div class="bni-lbl" style="color:var(--gm)">Profile</div></div>
+    </div>
+  </div>
+
+  <!-- ══ PAGE 5: EXERCISE ══ -->
+  <div class="screen" id="pg-exercise">
+    <div class="pre-ex-header">
+      <div class="sbar" style="color:var(--mut);padding:0;height:auto;margin-bottom:10px"><span>9:41</span><div>📶 🔋</div></div>
+      <button class="pre-ex-back" onclick="nav('home')">← Back to Home</button>
+      <div class="pre-ex-title">Morning Session</div>
+      <div class="pre-ex-sub" id="exPageSub">Loading…</div>
+    </div>
+
+    <div class="ex-setup">
+      <div class="ex-list">
+        <div style="background:#FFF7ED;border:1px solid #FBD38D;border-radius:14px;padding:13px 14px;display:flex;align-items:flex-start;gap:10px;margin-bottom:12px">
+          <span style="font-size:18px;flex-shrink:0">📱</span>
+          <div>
+            <div style="font-size:12px;font-weight:800;color:var(--gold);margin-bottom:3px">Camera Setup</div>
+            <div style="font-size:11px;color:#B7791F;line-height:1.5">Place phone 1.5–2m away at knee height. Full leg must be visible. Camera will activate when you start.</div>
+          </div>
+        </div>
+
+        <!-- Leg selector -->
+        <div style="font-size:11px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">Which leg are you exercising?</div>
+        <div class="leg-selector">
+          <button class="leg-sel-btn active" id="legBtnLeft" onclick="selectLegUI('left')">🦵 Left Leg</button>
+          <button class="leg-sel-btn" id="legBtnRight" onclick="selectLegUI('right')">Right Leg 🦵</button>
+        </div>
+
+        <div id="exDynamicList"><div style="text-align:center;color:var(--mut);font-size:12px;padding:16px">Loading exercises…</div></div>
+
+        <div style="background:var(--w);border-radius:16px;padding:16px;box-shadow:0 1px 8px rgba(0,0,0,0.05);margin-top:4px">
+          <div style="font-size:13px;font-weight:800;color:var(--txt);margin-bottom:10px">Pain level before starting?</div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px" id="painBtns">
+            <button onclick="setPain(this,0);logPain(0)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt);transition:all 0.15s">0</button>
+            <button onclick="setPain(this,1);logPain(1)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt)">1</button>
+            <button onclick="setPain(this,2);logPain(2)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt)">2</button>
+            <button onclick="setPain(this,3);logPain(3)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt)">3</button>
+            <button onclick="setPain(this,4);logPain(4)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt)">4</button>
+            <button onclick="setPain(this,5);logPain(5)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt)">5</button>
+            <button onclick="setPain(this,6);logPain(6)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt)">6</button>
+            <button onclick="setPain(this,7);logPain(7)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt)">7</button>
+            <button onclick="setPain(this,8);logPain(8)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt)">8</button>
+          </div>
+          <div style="font-size:10px;color:var(--mut);font-weight:700">0 = No pain &nbsp;·&nbsp; 7+ = Session paused, physio notified</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="start-session-wrap">
+      <button class="btn-start-big" onclick="startLive()">
+        <span>▶</span> Start Next Exercise
+      </button>
+    </div>
+
+    <div class="bnav">
+      <div class="bni" onclick="nav('home')"><div class="bni-ico">🏠</div><div class="bni-lbl">Home</div></div>
+      <div class="bni" onclick="nav('progress')"><div class="bni-ico">📊</div><div class="bni-lbl">Progress</div></div>
+      <div class="bni" onclick="nav('physio')"><div class="bni-ico">👨‍⚕️</div><div class="bni-lbl">My Physio</div></div>
+      <div class="bni" onclick="nav('profile')"><div class="bni-ico">👤</div><div class="bni-lbl">Profile</div></div>
+    </div>
+
+    <!-- LIVE SESSION OVERLAY -->
+    <div class="live-overlay" id="liveOverlay">
+      <div class="live-cam" id="liveCamWrap">
+        <div class="live-cam-bg"></div>
+        <!-- Real camera -->
+        <video id="input_video"></video>
+        <canvas id="output_canvas" width="640" height="480"></canvas>
+        <!-- Corner decorations -->
+        <div class="cam-corner tl"></div>
+        <div class="cam-corner tr"></div>
+        <div class="cam-corner bl"></div>
+        <div class="cam-corner br"></div>
+        <!-- HUD -->
+        <div class="hud-tl">
+          <div class="hud-box">
+            <div class="hud-val" id="repCount">0</div>
+            <div class="hud-lbl">Valid Reps</div>
+          </div>
+        </div>
+        <div class="hud-tr">
+          <div class="hud-box">
+            <div class="hud-val green" id="angleVal">—°</div>
+            <div class="hud-lbl">Flexion</div>
+          </div>
+        </div>
+        <!-- AI feedback -->
+        <div class="ai-strip">
+          <div class="ai-msg">
+            <div class="ai-pulse"></div>
+            <span id="aiFeedback">Initialising camera…</span>
+          </div>
+        </div>
+        <!-- Calibration overlay inside cam -->
+        <div class="cal-overlay-inner" id="calOverlayInner">
+          <div class="cal-title">📐 Calibration</div>
+          <div class="cal-inst">Hold your <strong id="calLegName" style="color:#68D391">LEFT</strong> leg straight (0–10° flexion). Hold still for 3 seconds.</div>
+          <div class="cal-status-box" id="calStatusBox">Searching…</div>
+          <div class="cal-timer-big" id="calTimerBig">3.0</div>
+          <div class="cal-progress-bar-wrap"><div class="cal-progress-bar-fill" id="calProgressFill"></div></div>
+          <div class="cal-hint-txt" id="calHintTxt">Position leg in view</div>
+          <div class="cal-angle-txt" id="calAngleTxt">Current: --°</div>
+        </div>
+        <!-- Float warnings -->
+        <div class="float-warning" id="wrongLegBanner">
+          <div class="float-warning-txt">⚠ Wrong Leg Detected</div>
+          <div class="float-warning-sub" id="wrongLegSub">Please use your selected leg</div>
+        </div>
+      </div>
+
+      <div class="live-panel">
+        <div class="live-ex-name" id="liveExName">Straight Leg Raise</div>
+        <div class="live-prog-txt" id="liveProgTxt">Calibrating…</div>
+        <div class="prog-track"><div class="prog-fill" id="liveProg" style="width:0%"></div></div>
+        <div class="qual-grid">
+          <div class="qb"><div class="qb-v g" id="qualScore">—</div><div class="qb-l">Quality</div></div>
+          <div class="qb"><div class="qb-v w" id="romVal">—°</div><div class="qb-l">Best ROM</div></div>
+          <div class="qb"><div class="qb-v g" id="hipStab">—</div><div class="qb-l">Hip</div></div>
+        </div>
+        <div class="live-actions">
+          <button class="live-btn pause" id="pauseBtn" onclick="togglePause()">⏸ Pause</button>
+          <button class="live-btn end" onclick="endSession()">■ End Session</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SESSION COMPLETE OVERLAY -->
+    <div class="complete-overlay" id="completeOverlay">
+      <div class="comp-top">
+        <div class="comp-check">✓</div>
+        <div class="comp-title">Session Complete!</div>
+        <div class="comp-sub" id="compSub">Great work today 🔥</div>
+        <div class="comp-stats">
+          <div class="cs"><div class="cs-v" id="compReps">—</div><div class="cs-l">Valid Reps</div></div>
+          <div class="cs"><div class="cs-v" id="compQuality">—%</div><div class="cs-l">Quality</div></div>
+          <div class="cs"><div class="cs-v" id="compROM">—°</div><div class="cs-l">Best ROM</div></div>
+        </div>
+      </div>
+      <div class="comp-body">
+        <div class="physio-notif">
+          <div class="pn-av">👩‍⚕️</div>
+          <div class="pn-t">
+            <strong>Dr. Priya Menon will review this</strong>
+            <span id="compPhysioNote">Data saved. Your physio will be notified.</span>
+          </div>
+        </div>
+        <div class="ai-summary">
+          <div class="ai-sum-lbl">AI Feedback Summary</div>
+          <div class="ai-sum-body" id="compAISummary">Processing session…</div>
+        </div>
+        <div class="ai-summary">
+          <div class="ai-sum-lbl">Send Report to Physio</div>
+          <div class="email-row">
+            <input class="email-inp" type="email" id="compEmailInp" placeholder="doctor@hospital.com">
+            <button class="email-send-btn" onclick="sendReport()">Send</button>
+          </div>
+          <div class="email-status" id="compEmailStatus"></div>
+          <div style="margin-top:8px;text-align:center">
+            <button onclick="downloadReport()" style="font-size:11px;font-weight:800;color:var(--gm);background:none;border:none;cursor:pointer;font-family:'Nunito',sans-serif;text-decoration:underline">↓ Download PDF Report</button>
+          </div>
+        </div>
+      </div>
+      <div class="comp-footer">
+        <button class="btn-done" onclick="finishAndGoHome()">Back to Home</button>
+      </div>
+    </div>
+
+  </div><!-- end pg-exercise -->
+
+</div><!-- end phone -->
+</div><!-- end device-wrap -->
+
+<script>
+// ═══════════════════════════════════════════════
+// EMAILJS CONFIG (from index.html)
+// ═══════════════════════════════════════════════
+const EMAILJS_CONFIG = {
+  PUBLIC_KEY: 'kOK8eC78MK7kSaNWJ',
+  SERVICE_ID: 'service_15agqao',
+  TEMPLATE_ID: 'template_stcbsh6'
+};
+try { emailjs.init(EMAILJS_CONFIG.PUBLIC_KEY); } catch(e) {}
+
+// ═══════════════════════════════════════════════
+// TTS
+// ═══════════════════════════════════════════════
+const TTS = {
+  enabled: true,
+  voice: null,
+  lastSpoken: {},
+  cooldown: 2000
+};
+function initTTS() {
+  const v = window.speechSynthesis.getVoices();
+  TTS.voice = v.find(x=>x.name.includes('Google US English')) || v.find(x=>x.lang==='en-US') || v[0];
+}
+if (window.speechSynthesis.onvoiceschanged !== undefined) window.speechSynthesis.onvoiceschanged = initTTS;
+function speak(text, priority='normal') {
+  if (!TTS.enabled || !window.speechSynthesis) return;
+  const now = Date.now();
+  if (priority==='normal' && TTS.lastSpoken[text] && now - TTS.lastSpoken[text] < TTS.cooldown) return;
+  if (priority==='high') window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.voice = TTS.voice; u.volume = 1; u.rate = 1; u.pitch = 1;
+  u.onend = () => { TTS.lastSpoken[text] = Date.now(); };
+  window.speechSynthesis.speak(u);
+}
+
+// ═══════════════════════════════════════════════
+// DETECTION CONFIG (from index.html)
+// ═══════════════════════════════════════════════
+const CONFIG = {
+  ROM: { STAND_THRESHOLD: 15, DEEP_THRESHOLD: 70, MAX_SAFE: -5, CALIBRATION_MIN: 0, CALIBRATION_MAX: 10 },
+  SPEED: { MIN_TIME: 2.0, MAX_TIME: 6.0 },
+  STABILITY: { HIP_THRESHOLD: 0.03, SMOOTHNESS_WINDOW: 10, JERK_THRESHOLD: 15, CALIBRATION_DURATION: 3.0, CALIBRATION_TOLERANCE: 0.05 },
+  TIMEOUT: 8.0,
+  WRONG_LEG_DETECTION: { MOVEMENT_THRESHOLD: 15, CONFIRMATION_FRAMES: 8, COOLDOWN_MS: 3000 }
+};
+
+// ═══════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════
+const state = {
+  leg: 'left',
+  legIndices: { hip: 24, knee: 26, ankle: 28 },
+  phase: 'STANDING',
+  validReps: 0, totalReps: 0,
+  currentRep: { minAngle:180, maxFlexion:0, startHipY:0, hipVariance:0, hyperextended:false, angleHistory:[], lastAngle:180, lastVelocity:0, maxJerk:0 },
+  sumRoM: 0, sumDuration: 0, bestROM: 0, totalScore: 0,
+  repLogs: [],
+  issues: { incompleteROM:0, tooFast:0, tooSlow:0, hyperextension:0, hipStability:0, jerky:0, wrongLeg:0 },
+  isCalibrating: false, calibrationStartTime: 0, calibrationStableTime: 0, calibrationData: [],
+  isCalibrated: false,
+  repStartTime: 0,
+  frameHistory: [], cameraStable: true, stabilityWarnings: 0,
+  wrongLegDetection: { selectedLegHistory:[], otherLegHistory:[], lastWarningTime:0, warningShown:false },
+  lastCalibrationSpeak: 0,
+  patientTracking: { patientLandmarks:null, helperDetected:false, patientConfidence:0, framesSincePatient:0, patientBoundingBox:null, calibrationPersonId:null }
+};
+let currentSessionData = null;
+let pose = null, camera = null;
+let isPaused = false;
+
+// ═══════════════════════════════════════════════
+// NAVIGATION
+// ═══════════════════════════════════════════════
+const pages = { home:'pg-home', progress:'pg-progress', physio:'pg-physio', profile:'pg-profile', exercise:'pg-exercise' };
+function nav(page) {
+  Object.values(pages).forEach(id => document.getElementById(id).classList.remove('active'));
+  document.getElementById(pages[page]).classList.add('active');
+  // Update bottom nav active states
+  document.querySelectorAll('.bnav').forEach(bnav => {
+    bnav.querySelectorAll('.bni').forEach(b => b.classList.remove('on'));
+  });
+  document.querySelectorAll('.bnav').forEach(bnav => {
+    const items = bnav.querySelectorAll('.bni');
+    const map = ['home','progress','physio','profile'];
+    map.forEach((pg,i) => { if(pg===page && items[i]) items[i].classList.add('on'); });
+  });
+  if (page === 'progress') renderProgressPage();
+  if (page === 'home') refreshHomeStats();
+}
+function goEx() { nav('exercise'); }
+
+// ═══════════════════════════════════════════════
+// LEG SELECTION (UI level)
+// ═══════════════════════════════════════════════
+let selectedLeg = 'left';
+function selectLegUI(leg) {
+  selectedLeg = leg;
+  document.getElementById('legBtnLeft').classList.toggle('active', leg==='left');
+  document.getElementById('legBtnRight').classList.toggle('active', leg==='right');
+}
+
+// ═══════════════════════════════════════════════
+// MEDIAPIPE SETUP
+// ═══════════════════════════════════════════════
+function setupMediaPipe() {
+  pose = new Pose({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}` });
+  pose.setOptions({ modelComplexity:1, smoothLandmarks:true, minDetectionConfidence:0.5, minTrackingConfidence:0.5 });
+  pose.onResults(onResults);
+  const video = document.getElementById('input_video');
+  camera = new Camera(video, {
+    onFrame: async () => { if (!isPaused) await pose.send({image: video}); },
+    width: 640, height: 480
+  });
+  camera.start().catch(e => {
+    document.getElementById('aiFeedback').textContent = 'Camera error: ' + e.message;
+  });
+}
+
+// ═══════════════════════════════════════════════
+// START LIVE SESSION
+// ═══════════════════════════════════════════════
+function startLive() {
+  // Set leg into state
+  state.leg = selectedLeg;
+  state.legIndices = selectedLeg==='left' ? {hip:24,knee:26,ankle:28} : {hip:23,knee:25,ankle:27};
+
+  // Show overlay
+  document.getElementById('liveOverlay').classList.add('show');
+
+  // Reset state
+  resetSessionState();
+  resetHUD();
+
+  document.getElementById('liveExName').textContent = 'Straight Leg Raise';
+  document.getElementById('liveProgTxt').textContent = 'Calibrating — hold your leg straight…';
+  document.getElementById('aiFeedback').textContent = 'Initialising camera…';
+
+  // Init MediaPipe if not already done
+  if (!pose) {
+    setupMediaPipe();
+    setTimeout(startCalibration, 2000);
+  } else {
+    startCalibration();
+  }
+}
+
+function resetHUD() {
+  document.getElementById('repCount').textContent = '0';
+  document.getElementById('angleVal').textContent = '—°';
+  document.getElementById('qualScore').textContent = '—';
+  document.getElementById('romVal').textContent = '—°';
+  document.getElementById('hipStab').textContent = '—';
+  document.getElementById('liveProg').style.width = '0%';
+}
+
+// ═══════════════════════════════════════════════
+// CALIBRATION
+// ═══════════════════════════════════════════════
+function startCalibration() {
+  state.isCalibrating = true;
+  state.isCalibrated = false;
+  state.calibrationStartTime = performance.now() / 1000;
+  state.calibrationStableTime = 0;
+  state.calibrationData = [];
+  state.lastCalibrationSpeak = 0;
+  resetPatientTracking();
+
+  const inner = document.getElementById('calOverlayInner');
+  inner.classList.add('active');
+  document.getElementById('calLegName').textContent = state.leg.toUpperCase();
+  document.getElementById('calStatusBox').textContent = 'Searching…';
+  document.getElementById('calStatusBox').className = 'cal-status-box';
+  document.getElementById('calTimerBig').textContent = '3.0';
+  document.getElementById('calProgressFill').style.width = '0%';
+  document.getElementById('calHintTxt').textContent = 'Position your leg in view';
+  document.getElementById('calAngleTxt').textContent = 'Current: --°';
+
+  document.getElementById('liveProgTxt').textContent = `Calibrating ${state.leg} leg — hold straight…`;
+  speak(`Starting calibration for ${state.leg} leg. Please stand straight.`, 'high');
+}
+
+function completeCalibration() {
+  state.isCalibrating = false;
+  state.isCalibrated = true;
+  document.getElementById('calOverlayInner').classList.remove('active');
+  document.getElementById('liveProgTxt').textContent = 'Tracking active — begin your exercise!';
+  document.getElementById('aiFeedback').textContent = 'Calibration complete — begin exercise!';
+  speak('Calibration complete. Begin exercise.', 'high');
+}
+
+function cancelCalibration(reason) {
+  state.isCalibrating = false;
+  document.getElementById('calOverlayInner').classList.remove('active');
+  document.getElementById('aiFeedback').textContent = '⚠ ' + reason + ' — tap End to retry.';
+  speak('Calibration failed. ' + reason, 'high');
+}
+
+// ═══════════════════════════════════════════════
+// onResults — MediaPipe callback
+// ═══════════════════════════════════════════════
+function onResults(results) {
+  const canvas = document.getElementById('output_canvas');
+  const ctx = canvas.getContext('2d');
+  const vw = results.image.width || 640;
+  const vh = results.image.height || 480;
+  if (canvas.width !== vw || canvas.height !== vh) { canvas.width = vw; canvas.height = vh; }
+
+  ctx.save();
+  ctx.clearRect(0, 0, vw, vh);
+  ctx.translate(vw, 0); ctx.scale(-1, 1);
+  ctx.drawImage(results.image, 0, 0, vw, vh);
+  ctx.restore();
+
+  if (!results.poseLandmarks) return;
+
+  const lm = results.poseLandmarks;
+  const idx = state.legIndices;
+  const hip = lm[idx.hip], knee = lm[idx.knee], ankle = lm[idx.ankle];
+
+  ctx.save();
+  ctx.translate(vw, 0); ctx.scale(-1, 1);
+
+  if (state.isCalibrating) {
+    processCalibrationFrame(lm, hip, knee, ankle, vw, vh);
+    drawSkeleton(ctx, lm, vw, vh, '#F6AD55');
+  } else if (state.isCalibrated) {
+    processExerciseFrame(lm, vw, vh);
+    drawSkeleton(ctx, lm, vw, vh, '#68D391');
+    checkWrongLeg(lm);
+  } else {
+    drawSkeleton(ctx, lm, vw, vh, '#68D391');
+  }
+
+  ctx.restore();
+}
+
+function drawSkeleton(ctx, lm, w, h, color) {
+  const idx = state.legIndices;
+  if (!lm[idx.hip] || !lm[idx.knee] || !lm[idx.ankle]) return;
+  ctx.strokeStyle = color; ctx.lineWidth = 5; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(lm[idx.hip].x*w, lm[idx.hip].y*h);
+  ctx.lineTo(lm[idx.knee].x*w, lm[idx.knee].y*h);
+  ctx.lineTo(lm[idx.ankle].x*w, lm[idx.ankle].y*h);
+  ctx.stroke();
+  [idx.hip, idx.knee, idx.ankle].forEach(i => {
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(lm[i].x*w, lm[i].y*h, 7, 0, Math.PI*2); ctx.fill();
+  });
+  // Knee circle
+  ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.setLineDash([4,4]);
+  ctx.beginPath(); ctx.arc(lm[idx.knee].x*w, lm[idx.knee].y*h, 30, 0, Math.PI*2); ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// ═══════════════════════════════════════════════
+// CALIBRATION FRAME
+// ═══════════════════════════════════════════════
+function processCalibrationFrame(lm, hip, knee, ankle, w, h) {
+  const now = performance.now() / 1000;
+  const elapsed = now - state.calibrationStartTime;
+  const nowMs = performance.now();
+
+  if (!hip || !knee || !ankle || hip.visibility < 0.5 || knee.visibility < 0.5 || ankle.visibility < 0.5) {
+    document.getElementById('calStatusBox').textContent = 'Leg not visible';
+    document.getElementById('calStatusBox').className = 'cal-status-box bad';
+    document.getElementById('calHintTxt').textContent = 'Move back to show full leg';
+    document.getElementById('calAngleTxt').textContent = 'Current: --°';
+    state.calibrationStableTime = 0;
+    document.getElementById('calTimerBig').textContent = CONFIG.STABILITY.CALIBRATION_DURATION.toFixed(1);
+    document.getElementById('calProgressFill').style.width = '0%';
+    if (nowMs - state.lastCalibrationSpeak > 4000) { speak('Leg not visible. Please move back.', 'normal'); state.lastCalibrationSpeak = nowMs; }
+    return;
+  }
+
+  const geo = calculateAngle(hip, knee, ankle);
+  const ana = 180 - geo;
+  document.getElementById('calAngleTxt').textContent = `Current: ${Math.round(ana)}°`;
+
+  const straight = ana >= CONFIG.ROM.CALIBRATION_MIN && ana <= CONFIG.ROM.CALIBRATION_MAX;
+  const stable = checkCalStability(hip, knee, ankle);
+
+  document.getElementById('calAngleTxt').style.color = straight ? '#68D391' : '#F6AD55';
+
+  if (straight && stable) {
+    state.calibrationStableTime += 0.033;
+    const pct = Math.min(100, (state.calibrationStableTime / CONFIG.STABILITY.CALIBRATION_DURATION) * 100);
+    document.getElementById('calStatusBox').textContent = 'Position Good ✓';
+    document.getElementById('calStatusBox').className = 'cal-status-box good';
+    document.getElementById('calTimerBig').textContent = Math.max(0, CONFIG.STABILITY.CALIBRATION_DURATION - state.calibrationStableTime).toFixed(1);
+    document.getElementById('calProgressFill').style.width = pct + '%';
+    document.getElementById('calHintTxt').textContent = 'Hold steady…';
+    if (state.calibrationStableTime >= CONFIG.STABILITY.CALIBRATION_DURATION) completeCalibration();
+  } else {
+    state.calibrationStableTime = 0;
+    document.getElementById('calTimerBig').textContent = CONFIG.STABILITY.CALIBRATION_DURATION.toFixed(1);
+    document.getElementById('calProgressFill').style.width = '0%';
+    if (!straight) {
+      const msg = ana < 0 ? "Don't lock knee — bend slightly" : "Straighten leg more (need 0–10°)";
+      document.getElementById('calStatusBox').textContent = msg;
+      document.getElementById('calStatusBox').className = 'cal-status-box bad';
+      document.getElementById('calHintTxt').textContent = `Angle: ${Math.round(ana)}°`;
+      if (nowMs - state.lastCalibrationSpeak > 3000) { speak(ana < 0 ? 'Do not lock your knee.' : 'Straighten your leg more.', 'normal'); state.lastCalibrationSpeak = nowMs; }
+    } else {
+      document.getElementById('calStatusBox').textContent = 'Too much movement';
+      document.getElementById('calStatusBox').className = 'cal-status-box bad';
+      document.getElementById('calHintTxt').textContent = 'Hold still';
+    }
+  }
+  if (elapsed > 30) cancelCalibration('Timeout. Try again.');
+}
+
+function checkCalStability(hip, knee, ankle) {
+  state.calibrationData.push({ hip, knee, ankle });
+  if (state.calibrationData.length > 10) state.calibrationData.shift();
+  if (state.calibrationData.length < 5) return true;
+  const hv = calcVariance(state.calibrationData.map(d=>d.hip.x)) + calcVariance(state.calibrationData.map(d=>d.hip.y));
+  const kv = calcVariance(state.calibrationData.map(d=>d.knee.x)) + calcVariance(state.calibrationData.map(d=>d.knee.y));
+  return (hv + kv) < CONFIG.STABILITY.CALIBRATION_TOLERANCE;
+}
+function calcVariance(arr) {
+  const m = arr.reduce((a,b)=>a+b,0)/arr.length;
+  return Math.sqrt(arr.map(v=>Math.pow(v-m,2)).reduce((a,b)=>a+b,0)/arr.length);
+}
+
+// ═══════════════════════════════════════════════
+// EXERCISE FRAME
+// ═══════════════════════════════════════════════
+function processExerciseFrame(lm, w, h) {
+  const now = performance.now() / 1000;
+  const idx = state.legIndices;
+  const hip = lm[idx.hip], knee = lm[idx.knee], ankle = lm[idx.ankle];
+  if (!hip || !knee || !ankle || hip.visibility < 0.5) {
+    document.getElementById('aiFeedback').textContent = 'Leg not visible — step back';
+    return;
+  }
+
+  // Check timeout
+  if (state.phase !== 'STANDING' && (now - state.repStartTime) > CONFIG.TIMEOUT) {
+    state.phase = 'STANDING'; state.totalReps++;
+    document.getElementById('aiFeedback').textContent = 'Rep timed out — too slow';
+    speak('Too slow. Try again.', 'high');
+    updateLivePanel(); return;
+  }
+
+  const geo = calculateAngle(hip, knee, ankle);
+  const ana = 180 - geo;
+
+  updateSmoothness(geo);
+
+  // Update HUD
+  document.getElementById('angleVal').textContent = Math.round(ana) + '°';
+  document.getElementById('hipStab').textContent = state.currentRep.hipVariance < CONFIG.STABILITY.HIP_THRESHOLD ? 'Stable' : 'Watch hip';
+  document.getElementById('hipStab').style.color = state.currentRep.hipVariance < CONFIG.STABILITY.HIP_THRESHOLD ? '#68D391' : '#F6AD55';
+
+  if (ana < CONFIG.ROM.MAX_SAFE) {
+    state.currentRep.hyperextended = true;
+    document.getElementById('aiFeedback').textContent = "Don't lock your knee";
+  }
+
+  if (state.phase === 'STANDING' && ana > CONFIG.ROM.STAND_THRESHOLD) {
+    state.phase = 'DESCENDING'; state.repStartTime = now;
+    resetRepData(); state.currentRep.maxFlexion = ana; state.currentRep.startHipY = hip.y;
+    document.getElementById('aiFeedback').textContent = 'Good — raise slowly!';
+    speak('Lower slowly.', 'normal');
+  } else if (state.phase !== 'STANDING') {
+    if (ana > state.currentRep.maxFlexion) { state.currentRep.maxFlexion = ana; }
+    state.currentRep.hipVariance = Math.max(state.currentRep.hipVariance, Math.abs(hip.y - state.currentRep.startHipY));
+    if (state.phase === 'DESCENDING' && ana > CONFIG.ROM.DEEP_THRESHOLD) {
+      state.phase = 'ASCENDING';
+      document.getElementById('aiFeedback').textContent = 'Now extend up — controlled!';
+      speak('Extend up.', 'normal');
+    }
+    if (state.phase === 'ASCENDING' && ana < CONFIG.ROM.STAND_THRESHOLD) finishRep(now);
+  }
+}
+
+function finishRep(now) {
+  state.phase = 'STANDING'; state.totalReps++;
+  const r = state.currentRep;
+  const duration = now - state.repStartTime;
+  const rom = r.maxFlexion;
+  const hipStable = r.hipVariance < CONFIG.STABILITY.HIP_THRESHOLD;
+  const smooth = getSmoothness();
+
+  const issues = {
+    incompleteROM: rom < 50, tooFast: duration < CONFIG.SPEED.MIN_TIME,
+    tooSlow: duration > CONFIG.SPEED.MAX_TIME, hyperextension: r.hyperextended,
+    hipStability: !hipStable, jerky: r.maxJerk > CONFIG.STABILITY.JERK_THRESHOLD
+  };
+  const valid = !issues.incompleteROM && !issues.tooFast && !issues.tooSlow;
+
+  Object.entries(issues).forEach(([k,v]) => { if(v) state.issues[k]++; });
+
+  const score = calcScore(duration, rom, smooth, hipStable, r.hyperextended);
+
+  if (valid) {
+    state.validReps++; state.sumRoM += rom; state.sumDuration += duration; state.totalScore += score;
+    if (rom > state.bestROM) state.bestROM = rom;
+    const tips = ["Great rep! Keep it up.", "Excellent form!", "Perfect. Breathe steady.", "Well done!"];
+    document.getElementById('aiFeedback').textContent = tips[state.validReps % tips.length];
+    speak('Good rep.', 'normal');
+  } else {
+    const fb = issues.incompleteROM ? 'Bend more' : issues.tooFast ? 'Too fast — slow down' : issues.tooSlow ? 'Too slow' : issues.hipStability ? 'Keep hip stable' : 'Watch your form';
+    document.getElementById('aiFeedback').textContent = '⚠ ' + fb;
+    speak(fb, 'high');
+  }
+
+  document.getElementById('qualScore').textContent = score + '%';
+  document.getElementById('qualScore').style.color = score > 80 ? '#68D391' : score > 60 ? '#F6AD55' : '#FC8181';
+  document.getElementById('romVal').textContent = Math.round(state.bestROM) + '°';
+  document.getElementById('repCount').textContent = state.validReps;
+  updateLivePanel();
+}
+
+function calcScore(dur, rom, smooth, hipStable, hyper) {
+  let s = Math.min(100, rom/70*100) * 0.4;
+  let tempo = (dur>=2.5&&dur<=4) ? 100 : (dur>=2&&dur<=6) ? 70 : 40;
+  s += tempo * 0.3;
+  let ctrl = smooth; if (!hipStable) ctrl*=0.7; if (hyper) ctrl*=0.5;
+  s += ctrl * 0.3;
+  return Math.round(s);
+}
+
+function updateSmoothness(angle) {
+  const r = state.currentRep;
+  const vel = angle - r.lastAngle; const jerk = Math.abs(vel - r.lastVelocity);
+  r.angleHistory.push({angle,vel,jerk});
+  if (r.angleHistory.length > CONFIG.STABILITY.SMOOTHNESS_WINDOW) r.angleHistory.shift();
+  r.maxJerk = Math.max(r.maxJerk, jerk); r.lastAngle = angle; r.lastVelocity = vel;
+}
+function getSmoothness() {
+  const h = state.currentRep.angleHistory;
+  if (h.length < 5) return 100;
+  const avg = h.reduce((a,b)=>a+b.jerk,0)/h.length;
+  return Math.max(0, 100 - avg*5);
+}
+
+function calculateAngle(a, b, c) {
+  const rad = Math.atan2(c.y-b.y,c.x-b.x) - Math.atan2(a.y-b.y,a.x-b.x);
+  let ang = Math.abs(rad*180/Math.PI);
+  return ang > 180 ? 360-ang : ang;
+}
+
+function updateLivePanel() {
+  document.getElementById('liveProgTxt').textContent = `${state.validReps} valid reps · ${state.totalReps} total`;
+  const pct = state.validReps > 0 ? Math.min(100, (state.validReps / 12) * 100) : 0;
+  document.getElementById('liveProg').style.width = pct + '%';
+}
+
+// ═══════════════════════════════════════════════
+// WRONG LEG DETECTION
+// ═══════════════════════════════════════════════
+function checkWrongLeg(lm) {
+  const now = performance.now();
+  const det = state.wrongLegDetection;
+  if (now - det.lastWarningTime < CONFIG.WRONG_LEG_DETECTION.COOLDOWN_MS) return;
+  const si = state.legIndices;
+  const oi = si.hip===23 ? {hip:24,knee:26,ankle:28} : {hip:23,knee:25,ankle:27};
+  const sh=lm[si.hip],sk=lm[si.knee],sa=lm[si.ankle];
+  const oh=lm[oi.hip],ok=lm[oi.knee],oa=lm[oi.ankle];
+  if (!sh||!sk||!sa||!oh||!ok||!oa) return;
+  if (sh.visibility<0.5||sk.visibility<0.5||sa.visibility<0.5||oh.visibility<0.5||ok.visibility<0.5||oa.visibility<0.5) return;
+
+  const selAna = 180 - calculateAngle(sh,sk,sa);
+  const othAna = 180 - calculateAngle(oh,ok,oa);
+  det.selectedLegHistory.push({angle:selAna,time:now});
+  det.otherLegHistory.push({angle:othAna,time:now});
+  det.selectedLegHistory = det.selectedLegHistory.filter(h=>now-h.time<500);
+  det.otherLegHistory = det.otherLegHistory.filter(h=>now-h.time<500);
+  if (det.selectedLegHistory.length < 8 || det.otherLegHistory.length < 8) return;
+
+  const selRange = Math.max(...det.selectedLegHistory.map(h=>h.angle)) - Math.min(...det.selectedLegHistory.map(h=>h.angle));
+  const othRange = Math.max(...det.otherLegHistory.map(h=>h.angle)) - Math.min(...det.otherLegHistory.map(h=>h.angle));
+
+  if (othRange > CONFIG.WRONG_LEG_DETECTION.MOVEMENT_THRESHOLD && selRange < CONFIG.WRONG_LEG_DETECTION.MOVEMENT_THRESHOLD/2) {
+    document.getElementById('wrongLegBanner').classList.add('show');
+    document.getElementById('wrongLegSub').textContent = `Please use your ${state.leg.toUpperCase()} leg`;
+    det.lastWarningTime = now; state.issues.wrongLeg++;
+    speak(`Warning. Please use your ${state.leg} leg.`, 'high');
+    setTimeout(() => document.getElementById('wrongLegBanner').classList.remove('show'), 3000);
+  }
+}
+
+// ═══════════════════════════════════════════════
+// PAUSE / END SESSION
+// ═══════════════════════════════════════════════
+function togglePause() {
+  isPaused = !isPaused;
+  const btn = document.getElementById('pauseBtn');
+  if (isPaused) {
+    btn.textContent = '▶ Resume'; btn.style.background = 'rgba(104,211,145,0.15)';
+    document.getElementById('aiFeedback').textContent = '⏸ Paused — tap Resume to continue';
+    speak('Session paused.', 'high');
+  } else {
+    btn.textContent = '⏸ Pause'; btn.style.background = '';
+    document.getElementById('aiFeedback').textContent = 'Resuming — get into position!';
+    speak('Resuming.', 'high');
+  }
+}
+
+function endSession() {
+  if (state.validReps === 0) {
+    // Still show complete overlay, just with zeros
+    showCompleteOverlay({ validReps:0, totalReps:state.totalReps, successRate:0, avgRom:0, bestRom:0, avgTime:'0.0', score:0, issues:{...state.issues}, stabilityWarnings:state.stabilityWarnings });
+    return;
+  }
+  const avgRom = Math.round(state.sumRoM / state.validReps);
+  const avgTime = (state.sumDuration / state.validReps).toFixed(1);
+  const avgScore = Math.round(state.totalScore / state.validReps);
+  const successRate = Math.round((state.validReps / state.totalReps) * 100);
+  const data = {
+    date: new Date().toLocaleString(), leg: state.leg.toUpperCase(),
+    validReps: state.validReps, totalReps: state.totalReps,
+    successRate, avgRom, bestRom: Math.round(state.bestROM),
+    avgTime, score: avgScore, issues:{...state.issues}, stabilityWarnings: state.stabilityWarnings
+  };
+  currentSessionData = data;
+
+  // Save to localStorage
+  const history = JSON.parse(localStorage.getItem('helify_sessions') || '[]');
+  history.unshift(data);
+  localStorage.setItem('helify_sessions', JSON.stringify(history.slice(0, 20)));
+  // Also save to Firestore (async, non-blocking)
+  if (window.saveSessionToFirestore) {
+    window.saveSessionToFirestore(data).then(() => {
+      // Refresh UI stats after save
+      refreshHomeStats();
+    });
+  } else {
+    refreshHomeStats();
+  }
+
+  speak(`Session complete. ${state.validReps} valid repetitions. Average score ${avgScore}.`, 'high');
+  showCompleteOverlay(data);
+  resetSessionState();
+}
+
+function showCompleteOverlay(data) {
+  document.getElementById('liveOverlay').classList.remove('show');
+  document.getElementById('calOverlayInner').classList.remove('active');
+
+  // Populate stats
+  document.getElementById('compReps').textContent = data.validReps;
+  document.getElementById('compQuality').textContent = (data.score || 0) + '%';
+  document.getElementById('compROM').textContent = (data.bestRom || 0) + '°';
+  document.getElementById('compSub').textContent = `${data.leg} leg · ${data.successRate || 0}% success rate 🔥`;
+
+  // AI summary
+  const iss = data.issues || {};
+  let aiTxt = '';
+  if (data.validReps === 0) {
+    aiTxt = '⚠️ No valid reps recorded. Ensure full range of motion (bend knee past 70°) and complete each rep in 2–6 seconds.';
+  } else {
+    aiTxt = `✅ ${data.validReps} valid reps completed\n`;
+    aiTxt += `✅ Best ROM: ${data.bestRom}° · Avg quality: ${data.score}%\n`;
+    if (iss.hipStability > 0) aiTxt += `⚠️ Hip stability issues on ${iss.hipStability} reps — focus on keeping hip square\n`;
+    if (iss.incompleteROM > 0) aiTxt += `⚠️ ${iss.incompleteROM} reps had incomplete bend — aim for 70°+\n`;
+    if (iss.tooFast > 0) aiTxt += `⚠️ ${iss.tooFast} reps were too fast — slow down for better control\n`;
+    if (iss.wrongLeg > 0) aiTxt += `⚠️ Wrong leg detected ${iss.wrongLeg} times\n`;
+    if (!iss.hipStability && !iss.incompleteROM && !iss.tooFast) aiTxt += '✅ Excellent form throughout!';
+  }
+  document.getElementById('compAISummary').style.whiteSpace = 'pre-line';
+  document.getElementById('compAISummary').textContent = aiTxt;
+  document.getElementById('compEmailInp').value = '';
+  document.getElementById('compEmailStatus').textContent = '';
+  document.getElementById('completeOverlay').classList.add('show');
+}
+
+function finishAndGoHome() {
+  document.getElementById('completeOverlay').classList.remove('show');
+  document.getElementById('liveOverlay').classList.remove('show');
+  isPaused = false;
+  state.isCalibrated = false; state.isCalibrating = false;
+  nav('home');
+}
+
+// ═══════════════════════════════════════════════
+// SESSION STATE HELPERS
+// ═══════════════════════════════════════════════
+function resetSessionState() {
+  state.phase='STANDING'; state.validReps=0; state.totalReps=0;
+  state.sumRoM=0; state.sumDuration=0; state.bestROM=0; state.totalScore=0;
+  state.repLogs=[]; state.stabilityWarnings=0;
+  state.issues={incompleteROM:0,tooFast:0,tooSlow:0,hyperextension:0,hipStability:0,jerky:0,wrongLeg:0};
+  state.wrongLegDetection={selectedLegHistory:[],otherLegHistory:[],lastWarningTime:0,warningShown:false};
+  state.isCalibrated=false; state.isCalibrating=false;
+  isPaused=false;
+  const btn = document.getElementById('pauseBtn');
+  btn.textContent='⏸ Pause'; btn.style.background='';
+  resetRepData();
+  resetPatientTracking();
+}
+
+function resetRepData() {
+  state.currentRep={minAngle:180,maxFlexion:0,startHipY:0,hipVariance:0,hyperextended:false,angleHistory:[],lastAngle:180,lastVelocity:0,maxJerk:0};
+}
+
+function resetPatientTracking() {
+  state.patientTracking={patientLandmarks:null,helperDetected:false,patientConfidence:0,framesSincePatient:0,patientBoundingBox:null,calibrationPersonId:null};
+}
+
+// ═══════════════════════════════════════════════
+// PDF & EMAIL (from index.html)
+// ═══════════════════════════════════════════════
+function generatePDF(data) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFillColor(45,106,79); doc.rect(0,0,210,35,'F');
+  doc.setTextColor(255,255,255); doc.setFontSize(22); doc.setFont('helvetica','bold');
+  doc.text('HEALIFY', 20, 25);
+  doc.setFontSize(10); doc.text(data.date, 130, 15);
+  doc.setTextColor(60,60,60); doc.setFontSize(14);
+  doc.text('SESSION REPORT', 20, 50);
+  let y = 65; doc.setFontSize(11);
+  const add = (label, val) => {
+    doc.setFont('helvetica','bold'); doc.text(label+':', 20, y);
+    doc.setFont('helvetica','normal'); doc.text(String(val), 80, y); y+=10;
+  };
+  add('Leg', data.leg); add('Valid Reps', `${data.validReps}/${data.totalReps}`);
+  add('Success Rate', `${data.successRate}%`); add('Avg ROM', `${data.avgRom}°`);
+  add('Best ROM', `${data.bestRom}°`); add('Avg Time/rep', `${data.avgTime}s`);
+  add('Quality Score', `${data.score}/100`);
+  doc.setFillColor(45,106,79); doc.rect(0,280,210,17,'F');
+  doc.setTextColor(255,255,255); doc.setFontSize(9);
+  doc.text('Healify AI Rehab System — healify.app', 105, 291, {align:'center'});
+  return doc;
+}
+
+function downloadReport() {
+  if (!currentSessionData) return;
+  try {
+    const doc = generatePDF(currentSessionData);
+    doc.save(`healify-session-${Date.now()}.pdf`);
+    document.getElementById('compEmailStatus').textContent = '✓ Downloaded successfully';
+  } catch(e) {
+    document.getElementById('compEmailStatus').textContent = 'Download failed. Try again.';
+  }
+}
+
+async function sendReport() {
+  if (!currentSessionData) return;
+  const email = document.getElementById('compEmailInp').value.trim();
+  const status = document.getElementById('compEmailStatus');
+  if (!email || !email.includes('@')) { status.textContent = '⚠ Enter a valid email address'; return; }
+  status.textContent = 'Sending…';
+  try {
+    const doc = generatePDF(currentSessionData);
+    const pdfBase64 = doc.output('datauristring').split(',')[1];
+    await emailjs.send(EMAILJS_CONFIG.SERVICE_ID, EMAILJS_CONFIG.TEMPLATE_ID, {
+      to_email: email, from_name: 'Healify',
+      subject: `Healify Report — ${currentSessionData.leg} Leg`,
+      message: `Session report attached.\n\n${currentSessionData.validReps} valid reps\n${currentSessionData.successRate}% success\n${currentSessionData.avgRom}° avg ROM\n${currentSessionData.score}/100 quality`,
+      attachment: pdfBase64
+    });
+    status.textContent = `✓ Report sent to ${email}`;
+    document.getElementById('compEmailInp').value = '';
+  } catch(e) {
+    status.textContent = 'Send failed. Try downloading instead.';
+  }
+}
+
+// ═══════════════════════════════════════════════
+// PROGRESS PAGE — driven by localStorage
+// ═══════════════════════════════════════════════
+function renderProgressPage() {
+  const history = JSON.parse(localStorage.getItem('helify_sessions') || '[]');
+  const chart = document.getElementById('barChart');
+  chart.innerHTML = '';
+
+  if (history.length === 0) {
+    chart.innerHTML = '<div style="width:100%;text-align:center;color:var(--mut);font-size:12px;padding:30px 0">No sessions yet. Complete a session to see your ROM progress.</div>';
+    document.getElementById('romTrend').textContent = 'No data yet';
+    document.getElementById('qtRows').innerHTML = '<div style="color:var(--mut);font-size:12px;text-align:center;padding:12px 0">No sessions recorded yet.</div>';
+    document.getElementById('sumSessions').textContent = '0';
+    document.getElementById('sumReps').textContent = '0';
+    document.getElementById('sumQuality').textContent = '—%';
+    return;
+  }
+
+  const maxVal = 120;
+  const recent = history.slice(0,8).reverse();
+  recent.forEach(s => {
+    const pct = ((s.bestRom||0) / maxVal) * 100;
+    const d = new Date(s.date || (s.createdAt?.seconds ? s.createdAt.seconds*1000 : Date.now()));
+    const label = d.toLocaleDateString('en',{month:'short',day:'numeric'});
+    const col = document.createElement('div');
+    col.className = 'bar-col';
+    col.innerHTML = `<div class="bar-val">${s.bestRom}°</div><div class="bar" style="height:${pct}%;min-height:8px" title="${label}: ${s.bestRom}°"></div><div class="bar-day">${label.split(' ')[1]}</div>`;
+    chart.appendChild(col);
+  });
+
+  // Trend
+  if (recent.length >= 2) {
+    const diff = recent[recent.length-1].bestRom - recent[0].bestRom;
+    document.getElementById('romTrend').textContent = diff >= 0 ? `↑ +${diff}° trend` : `↓ ${diff}° trend`;
+  } else {
+    document.getElementById('romTrend').textContent = `${recent[0].bestRom}° best ROM`;
+  }
+
+  // Summary
+  const totalReps = history.reduce((a,s)=>a+s.validReps, 0);
+  const avgQ = Math.round(history.reduce((a,s)=>a+s.score,0)/history.length);
+  document.getElementById('sumSessions').textContent = history.length;
+  document.getElementById('sumReps').textContent = totalReps;
+  document.getElementById('sumQuality').textContent = avgQ + '%';
+
+  // Quality timeline
+  const qtRows = document.getElementById('qtRows');
+  qtRows.innerHTML = history.slice(0,6).map(s => {
+    const d = new Date(s.date || (s.createdAt?.seconds ? s.createdAt.seconds*1000 : Date.now()));
+    const lbl = d.toLocaleDateString('en',{month:'short',day:'numeric'});
+    const sc = s.score || 0;
+    const flag = sc >= 85 ? '🔥' : sc >= 70 ? '👍' : '⚠️';
+    return `<div class="qt-row">
+      <div class="qt-date">${lbl}</div>
+      <div class="qt-bar-wrap"><div class="qt-bar" style="width:${sc}%"></div></div>
+      <div class="qt-val">${sc}%</div>
+      <div class="qt-flag">${flag}</div>
+    </div>`;
+  }).join('');
+
+  // ROM achievement
+  const bestEver = history.length ? Math.max(...history.map(s=>s.bestRom||0)) : 0;
+  const left = Math.max(0, 90 - bestEver);
+  const romAchEl = document.getElementById('romAchieve');
+  if (romAchEl) romAchEl.textContent = left > 0 ? `${left}° away` : 'Achieved! 🎯';
+  // Also update 30-session achievement
+  const sess30El = document.querySelector('.achieve-card.locked:last-child .achieve-sub');
+  if (sess30El) sess30El.textContent = history.length >= 30 ? 'Achieved! 🏅' : `${Math.max(0,30-history.length)} to go`;
+}
+
+function refreshHomeStats() {
+  // If Firebase is loaded and user is logged in, use full dynamic populate
+  if (window.populateAllUI && window._currentUser) {
+    window.populateAllUI(); return;
+  }
+  // Fallback: local session data only
+  const history = JSON.parse(localStorage.getItem('helify_sessions') || '[]');
+  if (!history.length) return;
+  const bestROM = Math.max(...history.map(s=>s.bestRom||0));
+  const avgQ = Math.round(history.reduce((a,s)=>a+(s.score||0),0)/history.length);
+  safeSetLocal('homeBestROM', bestROM + '°');
+  safeSetLocal('homeAvgQual', avgQ + '%');
+  if (history.length >= 2) {
+    const diff = (history[0].bestRom||0) - (history[1].bestRom||0);
+    safeSetLocal('homeROMTrend', diff >= 0 ? `↑ +${diff}° vs last session` : `↓ ${diff}° vs last session`);
+    safeSetLocal('homeQualTrend', (history[0].score||0) >= 80 ? '↑ Great form' : 'Keep working!');
+  } else {
+    safeSetLocal('homeROMTrend', '↑ First session!');
+    safeSetLocal('homeQualTrend', 'Keep it up!');
+  }
+  safeSetLocal('profileSessions', history.length);
+  safeSetLocal('sumSessions', history.length);
+  const totalReps = history.reduce((a,s)=>a+(s.validReps||0),0);
+  safeSetLocal('sumReps', totalReps);
+  safeSetLocal('sumQuality', avgQ + '%');
+}
+function safeSetLocal(id, val) {
+  const el = document.getElementById(id); if (el) el.textContent = val;
+}
+
+// ═══════════════════════════════════════════════
+// MISC UI
+// ═══════════════════════════════════════════════
+function selectEx(el) {
+  document.querySelectorAll('.ex-item').forEach(e => e.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+function setPain(btn, val) {
+  document.querySelectorAll('#painBtns button').forEach(b => {
+    b.style.background='var(--w)'; b.style.borderColor='var(--bdr)'; b.style.color='var(--txt)';
+  });
+  btn.style.background = val>=7 ? 'var(--red)' : 'var(--gm)';
+  btn.style.borderColor = val>=7 ? 'var(--red)' : 'var(--gm)';
+  btn.style.color = '#fff';
+}
+
+document.querySelectorAll('.toggle:not(#voiceToggleUI)').forEach(t => {
+  t.addEventListener('click', () => t.classList.toggle('off'));
+});
+
+function toggleVoiceFromUI() {
+  TTS.enabled = !TTS.enabled;
+  document.getElementById('voiceToggleUI').classList.toggle('off', !TTS.enabled);
+  if (TTS.enabled) speak('Voice feedback enabled.', 'high');
+}
+
+function clearHistory() {
+  if (confirm('Clear all session history? This cannot be undone.')) {
+    localStorage.removeItem('helify_sessions');
+    refreshHomeStats();
+    document.getElementById('homeBestROM').textContent = '—°';
+    document.getElementById('homeAvgQual').textContent = '—%';
+    document.getElementById('homeROMTrend').textContent = 'Complete a session';
+    document.getElementById('homeQualTrend').textContent = 'Complete a session';
+    alert('Session history cleared.');
+  }
+}
+
+// ═══════════════════════════════════════════════
+// AUTH HELPERS
+// ═══════════════════════════════════════════════
+function showApp() {
+  document.getElementById('authScreen').classList.add('hidden');
+  document.getElementById('appRoot').classList.add('visible');
+  refreshHomeStats();
+  initTTS();
+}
+function showAuthScreen() {
+  document.getElementById('authScreen').classList.remove('hidden');
+  document.getElementById('appRoot').classList.remove('visible');
+}
+function showVerifyScreen(email) {
+  document.getElementById('verifyEmailAddr').textContent = email || 'your email';
+  document.getElementById('verifyScreen').classList.add('show');
+  document.getElementById('authScreen').classList.add('hidden');
+  document.getElementById('resendStatus').textContent = '';
+  // Store email for resend
+  window._pendingVerifyEmail = email;
+}
+
+function hideVerifyScreen() {
+  document.getElementById('verifyScreen').classList.remove('show');
+  document.getElementById('authScreen').classList.remove('hidden');
+  // Switch to login tab so they can sign in after verifying
+  switchAuthTab('login');
+  const emailInp = document.getElementById('loginEmail');
+  if (emailInp && window._pendingVerifyEmail) emailInp.value = window._pendingVerifyEmail;
+}
+
+async function resendVerification() {
+  const email = window._pendingVerifyEmail;
+  if (!email) return;
+  const btn = document.getElementById('resendBtn');
+  const status = document.getElementById('resendStatus');
+  btn.disabled = true;
+  status.textContent = 'Sending…';
+  try {
+    const { error } = await _sb.auth.resend({ type: 'signup', email });
+    if (error) { status.textContent = 'Error: ' + error.message; }
+    else { status.textContent = '✓ Verification email resent!'; }
+  } catch(e) { status.textContent = 'Failed to resend. Try again.'; }
+  setTimeout(() => { btn.disabled = false; }, 30000); // 30s cooldown
+}
+
+function switchAuthTab(tab) {
+  document.getElementById('loginForm').style.display = tab==='login' ? '' : 'none';
+  document.getElementById('registerForm').style.display = tab==='register' ? '' : 'none';
+  document.getElementById('tabLogin').classList.toggle('on', tab==='login');
+  document.getElementById('tabRegister').classList.toggle('on', tab==='register');
+}
+async function doLogin() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const pass  = document.getElementById('loginPass').value;
+  const errEl = document.getElementById('loginErr');
+  const btn   = document.getElementById('loginBtn');
+  if (!email || !pass) { errEl.textContent = 'Please fill in all fields'; return; }
+  btn.disabled = true; btn.textContent = 'Signing in…'; errEl.textContent = '';
+  try {
+    if (window.fbLogin) await window.fbLogin(email, pass);
+    else { showApp(); } // fallback if Firebase not configured
+  } catch(e) {
+    errEl.textContent = e.code==='auth/invalid-credential' ? 'Wrong email or password' :
+                        e.code==='auth/user-not-found' ? 'No account found' : e.message;
+    btn.disabled = false; btn.textContent = 'Sign In →';
+  }
+}
+async function doGoogleLogin() {
+  try {
+    if (window.fbGoogleLogin) await window.fbGoogleLogin();
+    else showApp();
+  } catch(e) { document.getElementById('loginErr').textContent = e.message; }
+}
+async function doRegister() {
+  const name        = document.getElementById('regName').value.trim();
+  const age         = document.getElementById('regAge').value.trim();
+  const city        = document.getElementById('regCity').value.trim();
+  const condition   = document.getElementById('regCondition').value.trim();
+  const physio      = document.getElementById('regPhysio').value.trim();
+  const email       = document.getElementById('regEmail').value.trim();
+  const pass        = document.getElementById('regPass').value;
+  const surgeon     = document.getElementById('regSurgeon')?.value.trim() || '';
+  const surgeryDate = document.getElementById('regSurgeryDate')?.value || '';
+  const planDays    = document.getElementById('regPlanDays')?.value || '30';
+  const errEl       = document.getElementById('registerErr');
+  const btn         = document.getElementById('registerBtn');
+  if (!name||!email||!pass) { errEl.textContent = 'Name, email and password are required'; return; }
+  if (pass.length < 6) { errEl.textContent = 'Password must be at least 6 characters'; return; }
+  btn.disabled = true; btn.textContent = 'Creating account…'; errEl.textContent = '';
+  try {
+    if (window.fbRegister) {
+      await window.fbRegister(name, email, pass, age, condition, city, surgeon, surgeryDate, parseInt(planDays));
+      // Show email verification screen — user must confirm before logging in
+      showVerifyScreen(email);
+    } else showApp();
+  } catch(e) {
+    const msg = e.message || '';
+    errEl.textContent = msg.includes('already registered') || msg.includes('already been registered') ? 'Email already registered — sign in instead' :
+                        msg.includes('invalid') ? 'Invalid email address' : msg;
+    btn.disabled = false; btn.textContent = 'Create Account →';
+  }
+}
+async function signOutUser() {
+  if (confirm('Sign out of Healify?')) {
+    localStorage.removeItem('helify_sessions');
+    if (window.fbLogout) await window.fbLogout();
+    else showAuthScreen();
+  }
+}
+
+// ═══════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════
+initTTS();
+// Firebase module triggers showApp()/showAuthScreen() via onAuthStateChanged
+// Fallback if Firebase not configured yet:
+setTimeout(() => { if (!window._FB) showApp(); }, 2500);
+</script>
+</div><!-- end appRoot -->
+</body>
+</html>
