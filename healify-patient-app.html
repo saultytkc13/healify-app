@@ -34,11 +34,16 @@ window.addEventListener('load', function() {
       window._currentUser = session.user;
       document.getElementById('verifyScreen')?.classList.remove('show');
       if (typeof loadAllUserData === 'function') await loadAllUserData(session.user.id);
-      showApp();
+      // Defer so second script block is fully parsed before calling nav/render functions
+      setTimeout(() => {
+        if (typeof showApp === 'function') showApp();
+      }, 100);
     } else {
       window._currentUser = null;
       window._userProfile = null;
-      showAuthScreen();
+      setTimeout(() => {
+        if (typeof showAuthScreen === 'function') showAuthScreen();
+      }, 100);
     }
   });
 });
@@ -615,15 +620,11 @@ function showApp() {
   document.getElementById('authScreen')?.classList.add('hidden');
   document.getElementById('verifyScreen')?.classList.remove('show');
   document.getElementById('appRoot')?.classList.add('visible');
-  // Directly activate home screen — no dependency on nav()
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.getElementById('pg-home')?.classList.add('active');
-  document.querySelectorAll('.bni').forEach(b => b.classList.remove('on'));
-  document.querySelector('.bni')?.classList.add('on');
-  // Call helpers if available
-  try { if (typeof injectDesktopSidebar==='function') injectDesktopSidebar(); } catch(e){}
-  try { if (typeof refreshHomeStats==='function') refreshHomeStats(); } catch(e){}
-  try { if (typeof initTTS==='function') initTTS(); } catch(e){}
+  // Functions in second script block — call safely
+  if (typeof injectDesktopSidebar === 'function') injectDesktopSidebar();
+  if (typeof nav === 'function') nav('home');
+  if (typeof refreshHomeStats === 'function') refreshHomeStats();
+  if (typeof initTTS === 'function') { try { initTTS(); } catch(e) {} }
 }
 
 function showAuthScreen() {
@@ -1682,166 +1683,199 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
 
   <!-- ══ PAGE 5: EXERCISE ══ -->
   <div class="screen" id="pg-exercise">
-    <div class="pre-ex-header">
-      
-      <button class="pre-ex-back" onclick="nav('home')">← Back to Home</button>
-      <div class="pre-ex-title">Morning Session</div>
-      <div class="pre-ex-sub" id="exPageSub">Loading…</div>
-    </div>
 
-    <div class="ex-setup">
-      <div class="ex-list">
-        <div style="background:#FFF7ED;border:1px solid #FBD38D;border-radius:14px;padding:13px 14px;display:flex;align-items:flex-start;gap:10px;margin-bottom:12px">
-          <span style="font-size:18px;flex-shrink:0">📱</span>
-          <div>
-            <div style="font-size:12px;font-weight:800;color:var(--gold);margin-bottom:3px">Camera Setup</div>
-            <div style="font-size:11px;color:#B7791F;line-height:1.5">Place phone 1.5–2m away at knee height. Full leg must be visible. Camera will activate when you start.</div>
-          </div>
-        </div>
-
-        <!-- Leg selector -->
-        <div style="font-size:11px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">Which leg are you exercising?</div>
-        <div class="leg-selector">
-          <button class="leg-sel-btn active" id="legBtnLeft" onclick="selectLegUI('left')">🦵 Left Leg</button>
-          <button class="leg-sel-btn" id="legBtnRight" onclick="selectLegUI('right')">Right Leg 🦵</button>
-        </div>
-
-        <div id="exDynamicList"><div style="text-align:center;color:var(--mut);font-size:12px;padding:16px">Loading exercises…</div></div>
-
-        <div style="background:var(--w);border-radius:16px;padding:16px;box-shadow:0 1px 8px rgba(0,0,0,0.05);margin-top:4px">
-          <div style="font-size:13px;font-weight:800;color:var(--txt);margin-bottom:10px">Pain level before starting?</div>
-          <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px" id="painBtns">
-            <button onclick="setPain(this,0);logPain(0)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt);transition:all 0.15s">0</button>
-            <button onclick="setPain(this,1);logPain(1)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt)">1</button>
-            <button onclick="setPain(this,2);logPain(2)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt)">2</button>
-            <button onclick="setPain(this,3);logPain(3)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt)">3</button>
-            <button onclick="setPain(this,4);logPain(4)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt)">4</button>
-            <button onclick="setPain(this,5);logPain(5)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt)">5</button>
-            <button onclick="setPain(this,6);logPain(6)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt)">6</button>
-            <button onclick="setPain(this,7);logPain(7)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt)">7</button>
-            <button onclick="setPain(this,8);logPain(8)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt)">8</button>
-          </div>
-          <div style="font-size:10px;color:var(--mut);font-weight:700">0 = No pain &nbsp;·&nbsp; 7+ = Session paused, physio notified</div>
-        </div>
+    <!-- PRE-SESSION SETUP (shown before camera starts) -->
+    <div id="exSetupView" style="display:flex;flex-direction:column;flex:1;">
+      <div class="pre-ex-header">
+        <button class="pre-ex-back" onclick="nav('home')">← Back to Home</button>
+        <div class="pre-ex-title" id="exPageTitle">Morning Session</div>
+        <div class="pre-ex-sub" id="exPageSub">Select your leg and start when ready</div>
       </div>
-    </div>
 
-    <div class="start-session-wrap">
-      <button class="btn-start-big" onclick="startLive()">
-        <span>▶</span> Start Next Exercise
-      </button>
-    </div>
+      <div class="ex-setup" style="flex:1;overflow-y:auto;padding:0 0 80px;">
+        <div class="ex-list" style="padding:16px 18px;">
 
-    <div class="bnav">
-      <div class="bni" onclick="nav('home')"><div class="bni-ico">🏠</div><div class="bni-lbl">Home</div></div>
-      <div class="bni" onclick="nav('progress')"><div class="bni-ico">📊</div><div class="bni-lbl">Progress</div></div>
-      <div class="bni" onclick="nav('physio')"><div class="bni-ico">👨‍⚕️</div><div class="bni-lbl">My Physio</div></div>
-      <div class="bni" onclick="nav('profile')"><div class="bni-ico">👤</div><div class="bni-lbl">Profile</div></div>
-    </div>
+          <!-- Camera setup tip -->
+          <div style="background:#FFF7ED;border:1px solid #FBD38D;border-radius:14px;padding:13px 14px;display:flex;align-items:flex-start;gap:10px;margin-bottom:16px">
+            <span style="font-size:18px;flex-shrink:0">📱</span>
+            <div>
+              <div style="font-size:12px;font-weight:800;color:var(--gold);margin-bottom:3px">Camera Setup</div>
+              <div style="font-size:11px;color:#B7791F;line-height:1.5">Place phone 1.5–2m away at knee height. Full leg must be visible. Camera activates when you tap Start.</div>
+            </div>
+          </div>
 
-    <!-- LIVE SESSION OVERLAY -->
-    <div class="live-overlay" id="liveOverlay">
-      <div class="live-cam" id="liveCamWrap">
-        <div class="live-cam-bg"></div>
-        <!-- Real camera -->
-        <video id="input_video"></video>
-        <canvas id="output_canvas" width="640" height="480"></canvas>
-        <!-- Corner decorations -->
-        <div class="cam-corner tl"></div>
-        <div class="cam-corner tr"></div>
-        <div class="cam-corner bl"></div>
-        <div class="cam-corner br"></div>
-        <!-- HUD -->
-        <div class="hud-tl">
-          <div class="hud-box">
-            <div class="hud-val" id="repCount">0</div>
-            <div class="hud-lbl">Valid Reps</div>
+          <!-- Leg selector -->
+          <div style="font-size:11px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Which leg are you exercising?</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px;">
+            <button id="legBtnLeft" onclick="exSelectLeg('left')" style="padding:14px;border:2px solid var(--gm);border-radius:14px;background:var(--gm);color:#fff;font-size:14px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;transition:all 0.2s;">🦵 Left Leg</button>
+            <button id="legBtnRight" onclick="exSelectLeg('right')" style="padding:14px;border:2px solid var(--bdr);border-radius:14px;background:var(--w);color:var(--txt);font-size:14px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;transition:all 0.2s;">Right Leg 🦵</button>
           </div>
-        </div>
-        <div class="hud-tr">
-          <div class="hud-box">
-            <div class="hud-val green" id="angleVal">—°</div>
-            <div class="hud-lbl">Flexion</div>
+
+          <!-- Exercise list -->
+          <div id="exDynamicList">
+            <div style="text-align:center;color:var(--mut);font-size:12px;padding:16px">Loading exercises…</div>
           </div>
-        </div>
-        <!-- AI feedback -->
-        <div class="ai-strip">
-          <div class="ai-msg">
-            <div class="ai-pulse"></div>
-            <span id="aiFeedback">Initialising camera…</span>
+
+          <!-- Pain level -->
+          <div style="background:var(--w);border-radius:16px;padding:16px;box-shadow:0 1px 8px rgba(0,0,0,0.05);margin-top:4px">
+            <div style="font-size:13px;font-weight:800;color:var(--txt);margin-bottom:10px">Pain level before starting? (0–8)</div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px" id="painBtns">
+              <button onclick="setPain(this,0);logPain(0)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt);transition:all 0.15s">0</button>
+              <button onclick="setPain(this,1);logPain(1)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt);transition:all 0.15s">1</button>
+              <button onclick="setPain(this,2);logPain(2)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt);transition:all 0.15s">2</button>
+              <button onclick="setPain(this,3);logPain(3)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt);transition:all 0.15s">3</button>
+              <button onclick="setPain(this,4);logPain(4)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt);transition:all 0.15s">4</button>
+              <button onclick="setPain(this,5);logPain(5)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt);transition:all 0.15s">5</button>
+              <button onclick="setPain(this,6);logPain(6)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt);transition:all 0.15s">6</button>
+              <button onclick="setPain(this,7);logPain(7)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt);transition:all 0.15s">7</button>
+              <button onclick="setPain(this,8);logPain(8)" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt);transition:all 0.15s">8</button>
+            </div>
+            <div style="font-size:10px;color:var(--mut);font-weight:700">0 = No pain · 7+ = Session paused, physio notified</div>
           </div>
-        </div>
-        <!-- Calibration overlay inside cam -->
-        <div class="cal-overlay-inner" id="calOverlayInner">
-          <div class="cal-title">📐 Calibration</div>
-          <div class="cal-inst">Hold your <strong id="calLegName" style="color:#68D391">LEFT</strong> leg straight (0–10° flexion). Hold still for 3 seconds.</div>
-          <div class="cal-status-box" id="calStatusBox">Searching…</div>
-          <div class="cal-timer-big" id="calTimerBig">3.0</div>
-          <div class="cal-progress-bar-wrap"><div class="cal-progress-bar-fill" id="calProgressFill"></div></div>
-          <div class="cal-hint-txt" id="calHintTxt">Position leg in view</div>
-          <div class="cal-angle-txt" id="calAngleTxt">Current: --°</div>
-        </div>
-        <!-- Float warnings -->
-        <div class="float-warning" id="wrongLegBanner">
-          <div class="float-warning-txt">⚠ Wrong Leg Detected</div>
-          <div class="float-warning-sub" id="wrongLegSub">Please use your selected leg</div>
         </div>
       </div>
 
-      <div class="live-panel">
-        <div class="live-ex-name" id="liveExName">Straight Leg Raise</div>
-        <div class="live-prog-txt" id="liveProgTxt">Calibrating…</div>
-        <div class="prog-track"><div class="prog-fill" id="liveProg" style="width:0%"></div></div>
-        <div class="qual-grid">
-          <div class="qb"><div class="qb-v g" id="qualScore">—</div><div class="qb-l">Quality</div></div>
-          <div class="qb"><div class="qb-v w" id="romVal">—°</div><div class="qb-l">Best ROM</div></div>
-          <div class="qb"><div class="qb-v g" id="hipStab">—</div><div class="qb-l">Hip</div></div>
+      <!-- Start button -->
+      <div style="padding:16px 18px;flex-shrink:0;">
+        <button onclick="startExerciseSession()" style="width:100%;padding:18px;background:var(--gm);color:#fff;border:none;border-radius:16px;font-size:16px;font-weight:900;cursor:pointer;font-family:'Nunito',sans-serif;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 4px 16px rgba(45,106,79,0.3);">
+          ▶ Start Session
+        </button>
+      </div>
+
+      <div class="bnav">
+        <div class="bni" onclick="nav('home')"><div class="bni-ico">🏠</div><div class="bni-lbl">Home</div></div>
+        <div class="bni" onclick="nav('progress')"><div class="bni-ico">📊</div><div class="bni-lbl">Progress</div></div>
+        <div class="bni" onclick="nav('physio')"><div class="bni-ico">👨‍⚕️</div><div class="bni-lbl">My Physio</div></div>
+        <div class="bni" onclick="nav('profile')"><div class="bni-ico">👤</div><div class="bni-lbl">Profile</div></div>
+      </div>
+    </div>
+
+    <!-- LIVE SESSION VIEW (full screen, shown after Start) -->
+    <div id="exLiveView" style="display:none;position:fixed;inset:0;z-index:200;flex-direction:column;background:#050505;">
+
+      <!-- Camera + canvas -->
+      <div style="position:relative;flex:1;overflow:hidden;background:#000;">
+        <video id="ex_video" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);"></video>
+        <canvas id="ex_canvas" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
+
+        <!-- Corner brackets (Healify style) -->
+        <div style="position:absolute;top:12px;left:12px;width:28px;height:28px;border-top:3px solid var(--gm);border-left:3px solid var(--gm);"></div>
+        <div style="position:absolute;top:12px;right:12px;width:28px;height:28px;border-top:3px solid var(--gm);border-right:3px solid var(--gm);"></div>
+        <div style="position:absolute;bottom:180px;left:12px;width:28px;height:28px;border-bottom:3px solid var(--gm);border-left:3px solid var(--gm);"></div>
+        <div style="position:absolute;bottom:180px;right:12px;width:28px;height:28px;border-bottom:3px solid var(--gm);border-right:3px solid var(--gm);"></div>
+
+        <!-- HUD top-left: reps -->
+        <div style="position:absolute;top:14px;left:50px;background:rgba(0,0,0,0.6);border:1px solid rgba(116,198,157,0.3);border-radius:10px;padding:8px 14px;text-align:center;">
+          <div id="ex_repCount" style="font-size:26px;font-weight:900;color:#68D391;line-height:1;">0</div>
+          <div style="font-size:9px;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.1em;">Valid Reps</div>
         </div>
-        <div class="live-actions">
-          <button class="live-btn pause" id="pauseBtn" onclick="togglePause()">⏸ Pause</button>
-          <button class="live-btn end" onclick="endSession()">■ End Session</button>
+
+        <!-- HUD top-right: angle -->
+        <div style="position:absolute;top:14px;right:50px;background:rgba(0,0,0,0.6);border:1px solid rgba(116,198,157,0.3);border-radius:10px;padding:8px 14px;text-align:center;">
+          <div id="ex_angleVal" style="font-size:26px;font-weight:900;color:#68D391;line-height:1;">--°</div>
+          <div style="font-size:9px;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.1em;">Flexion</div>
+        </div>
+
+        <!-- AI coaching feedback strip -->
+        <div id="ex_coachingHud" style="position:absolute;bottom:190px;left:50%;transform:translateX(-50%);background:rgba(27,67,50,0.85);border:1px solid rgba(116,198,157,0.3);border-radius:100px;padding:8px 20px;font-size:13px;font-weight:800;color:#fff;white-space:nowrap;opacity:0;transition:opacity 0.3s;pointer-events:none;">
+          <span id="ex_coachingTxt">Position patient</span>
+        </div>
+
+        <!-- Calibration overlay -->
+        <div id="ex_calOverlay" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,0.8);align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:24px;text-align:center;">
+          <div style="font-size:15px;font-weight:900;color:#fff;text-transform:uppercase;letter-spacing:0.1em;">📐 Calibration</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.7);">Hold your <strong id="ex_calLeg" style="color:#68D391;">LEFT</strong> leg straight (0–10°)</div>
+          <div id="ex_calStatus" style="padding:8px 18px;border-radius:100px;background:rgba(116,198,157,0.15);border:1px solid rgba(116,198,157,0.3);font-size:12px;font-weight:700;color:#68D391;">Searching…</div>
+          <div id="ex_calTimer" style="font-size:40px;font-weight:900;color:#fff;font-family:'Roboto Mono',monospace;">3.0</div>
+          <div style="width:200px;height:4px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;">
+            <div id="ex_calProgress" style="height:100%;background:var(--gm);width:0%;transition:width 0.1s;"></div>
+          </div>
+          <div id="ex_calHint" style="font-size:11px;color:rgba(255,255,255,0.4);">Position your leg in view</div>
+          <div id="ex_calAngle" style="font-size:11px;color:rgba(255,255,255,0.3);">Current: --°</div>
+        </div>
+
+        <!-- Wrong leg warning -->
+        <div id="ex_wrongLeg" style="display:none;position:absolute;top:70px;left:50%;transform:translateX(-50%);background:rgba(220,38,38,0.9);border-radius:10px;padding:10px 18px;text-align:center;white-space:nowrap;">
+          <div style="font-size:12px;font-weight:800;color:#fff;">⚠ Wrong Leg Detected</div>
+        </div>
+      </div>
+
+      <!-- Live controls panel at bottom -->
+      <div style="background:#0a0a0a;border-top:1px solid #222;padding:14px 18px;flex-shrink:0;">
+        <!-- Metrics row -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;">
+          <div style="text-align:center;">
+            <div id="ex_qualScore" style="font-size:18px;font-weight:900;color:#68D391;">--</div>
+            <div style="font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;">Quality</div>
+          </div>
+          <div style="text-align:center;">
+            <div id="ex_romVal" style="font-size:18px;font-weight:900;color:#4FC3F7;">--°</div>
+            <div style="font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;">Best ROM</div>
+          </div>
+          <div style="text-align:center;">
+            <div id="ex_hipStab" style="font-size:18px;font-weight:900;color:#4FC3F7;">--</div>
+            <div style="font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;">Hip</div>
+          </div>
+          <div style="text-align:center;">
+            <div id="ex_totalReps" style="font-size:18px;font-weight:900;color:rgba(255,255,255,0.5);">0/0</div>
+            <div style="font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;">Reps</div>
+          </div>
+        </div>
+        <!-- Buttons -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <button id="ex_pauseBtn" onclick="exTogglePause()" style="padding:13px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:12px;color:#fff;font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;">⏸ Pause</button>
+          <button onclick="exEndSession()" style="padding:13px;background:rgba(45,106,79,0.3);border:1px solid var(--gm);border-radius:12px;color:#68D391;font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;">■ End Session</button>
         </div>
       </div>
     </div>
 
     <!-- SESSION COMPLETE OVERLAY -->
-    <div class="complete-overlay" id="completeOverlay">
-      <div class="comp-top">
-        <div class="comp-check">✓</div>
-        <div class="comp-title">Session Complete!</div>
-        <div class="comp-sub" id="compSub">Great work today 🔥</div>
-        <div class="comp-stats">
-          <div class="cs"><div class="cs-v" id="compReps">—</div><div class="cs-l">Valid Reps</div></div>
-          <div class="cs"><div class="cs-v" id="compQuality">—%</div><div class="cs-l">Quality</div></div>
-          <div class="cs"><div class="cs-v" id="compROM">—°</div><div class="cs-l">Best ROM</div></div>
-        </div>
-      </div>
-      <div class="comp-body">
-        <div class="physio-notif">
-          <div class="pn-av">👩‍⚕️</div>
-          <div class="pn-t">
-            <strong>Dr. Priya Menon will review this</strong>
-            <span id="compPhysioNote">Data saved. Your physio will be notified.</span>
+    <div id="exCompleteView" style="display:none;position:fixed;inset:0;z-index:300;flex-direction:column;background:var(--w);overflow-y:auto;">
+      <div style="background:linear-gradient(150deg,var(--gd),var(--gm));padding:40px 24px 32px;text-align:center;flex-shrink:0;">
+        <div style="width:72px;height:72px;background:rgba(255,255,255,0.15);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:30px;margin:0 auto 14px;border:2px solid rgba(255,255,255,0.3);">✓</div>
+        <div style="font-size:24px;font-weight:900;color:#fff;margin-bottom:6px;">Session Complete!</div>
+        <div id="exCompSub" style="font-size:13px;color:rgba(255,255,255,0.6);">Great work today 🔥</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:20px;">
+          <div style="background:rgba(255,255,255,0.1);border-radius:14px;padding:14px 8px;text-align:center;">
+            <div id="exCompReps" style="font-size:28px;font-weight:900;color:#fff;">—</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase;">Valid Reps</div>
           </div>
-        </div>
-        <div class="ai-summary">
-          <div class="ai-sum-lbl">AI Feedback Summary</div>
-          <div class="ai-sum-body" id="compAISummary">Processing session…</div>
-        </div>
-        <div class="ai-summary">
-          <div class="ai-sum-lbl">Send Report to Physio</div>
-          <div class="email-row">
-            <input class="email-inp" type="email" id="compEmailInp" placeholder="doctor@hospital.com">
-            <button class="email-send-btn" onclick="sendReport()">Send</button>
+          <div style="background:rgba(255,255,255,0.1);border-radius:14px;padding:14px 8px;text-align:center;">
+            <div id="exCompQuality" style="font-size:28px;font-weight:900;color:#fff;">—</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase;">Quality</div>
           </div>
-          <div class="email-status" id="compEmailStatus"></div>
-          <div style="margin-top:8px;text-align:center">
-            <button onclick="downloadReport()" style="font-size:11px;font-weight:800;color:var(--gm);background:none;border:none;cursor:pointer;font-family:'Nunito',sans-serif;text-decoration:underline">↓ Download PDF Report</button>
+          <div style="background:rgba(255,255,255,0.1);border-radius:14px;padding:14px 8px;text-align:center;">
+            <div id="exCompROM" style="font-size:28px;font-weight:900;color:#fff;">—°</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase;">Best ROM</div>
           </div>
         </div>
       </div>
-      <div class="comp-footer">
-        <button class="btn-done" onclick="finishAndGoHome()">Back to Home</button>
+      <div style="flex:1;padding:20px 18px;">
+        <div style="background:var(--gp);border-radius:14px;padding:14px 16px;display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+          <div style="font-size:24px;">👩‍⚕️</div>
+          <div>
+            <div style="font-size:13px;font-weight:800;color:var(--gd);">Data saved to your physio</div>
+            <div id="exCompNote" style="font-size:11px;color:var(--sub);">Your session has been recorded.</div>
+          </div>
+        </div>
+        <!-- AI summary -->
+        <div style="background:var(--w);border:1px solid var(--bdr);border-radius:14px;padding:14px 16px;margin-bottom:14px;">
+          <div style="font-size:10px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">AI Feedback Summary</div>
+          <div id="exCompAISummary" style="font-size:13px;color:var(--txt);line-height:1.6;">Processing…</div>
+        </div>
+        <!-- Email report -->
+        <div style="background:var(--w);border:1px solid var(--bdr);border-radius:14px;padding:14px 16px;margin-bottom:20px;">
+          <div style="font-size:10px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Send Report to Physio</div>
+          <div style="display:flex;gap:8px;">
+            <input id="exCompEmail" type="email" placeholder="doctor@hospital.com" style="flex:1;padding:10px 14px;border:1.5px solid var(--bdr);border-radius:100px;font-size:13px;font-family:'Nunito',sans-serif;outline:none;background:var(--bg);color:var(--txt);">
+            <button onclick="exSendReport()" style="padding:10px 16px;background:var(--gm);color:#fff;border:none;border-radius:100px;font-size:12px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;white-space:nowrap;">Send</button>
+          </div>
+          <div id="exEmailStatus" style="font-size:11px;color:var(--mut);text-align:center;margin-top:6px;"></div>
+          <div style="text-align:center;margin-top:8px;">
+            <button onclick="exDownloadPDF()" style="font-size:11px;font-weight:800;color:var(--gm);background:none;border:none;cursor:pointer;font-family:'Nunito',sans-serif;text-decoration:underline;">↓ Download PDF Report</button>
+          </div>
+        </div>
+        <button onclick="exGoHome()" style="width:100%;padding:16px;background:var(--gm);color:#fff;border:none;border-radius:14px;font-size:15px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;">← Back to Home</button>
       </div>
     </div>
 
@@ -1887,39 +1921,541 @@ function speak(text, priority='normal') {
 }
 
 // ═══════════════════════════════════════════════
-// DETECTION CONFIG (from index.html)
+// EXERCISE ENGINE — adapted from Healify Kinetic System
 // ═══════════════════════════════════════════════
+
+// Config
 const CONFIG = {
-  ROM: { STAND_THRESHOLD: 15, DEEP_THRESHOLD: 70, MAX_SAFE: -5, CALIBRATION_MIN: 0, CALIBRATION_MAX: 10 },
-  SPEED: { MIN_TIME: 2.0, MAX_TIME: 6.0 },
-  STABILITY: { HIP_THRESHOLD: 0.03, SMOOTHNESS_WINDOW: 10, JERK_THRESHOLD: 15, CALIBRATION_DURATION: 3.0, CALIBRATION_TOLERANCE: 0.05 },
-  TIMEOUT: 8.0,
-  WRONG_LEG_DETECTION: { MOVEMENT_THRESHOLD: 15, CONFIRMATION_FRAMES: 8, COOLDOWN_MS: 3000 }
+  ROM:      { STAND_THRESHOLD:15, DEEP_THRESHOLD:70, MAX_SAFE:-5, CALIBRATION_MIN:0, CALIBRATION_MAX:10 },
+  SPEED:    { MIN_TIME:2.0, MAX_TIME:6.0 },
+  STABILITY:{ HIP_THRESHOLD:0.03, SMOOTHNESS_WINDOW:10, JERK_THRESHOLD:15, CALIBRATION_DURATION:3.0, CALIBRATION_TOLERANCE:0.05 },
+  TIMEOUT:  8.0,
+  WRONG_LEG_DETECTION: { MOVEMENT_THRESHOLD:15, CONFIRMATION_FRAMES:8, COOLDOWN_MS:3000 }
 };
 
-// ═══════════════════════════════════════════════
-// STATE
-// ═══════════════════════════════════════════════
-const state = {
-  leg: 'left',
-  legIndices: { hip: 24, knee: 26, ankle: 28 },
-  phase: 'STANDING',
-  validReps: 0, totalReps: 0,
-  currentRep: { minAngle:180, maxFlexion:0, startHipY:0, hipVariance:0, hyperextended:false, angleHistory:[], lastAngle:180, lastVelocity:0, maxJerk:0 },
-  sumRoM: 0, sumDuration: 0, bestROM: 0, totalScore: 0,
-  repLogs: [],
-  issues: { incompleteROM:0, tooFast:0, tooSlow:0, hyperextension:0, hipStability:0, jerky:0, wrongLeg:0 },
-  isCalibrating: false, calibrationStartTime: 0, calibrationStableTime: 0, calibrationData: [],
-  isCalibrated: false,
-  repStartTime: 0,
-  frameHistory: [], cameraStable: true, stabilityWarnings: 0,
-  wrongLegDetection: { selectedLegHistory:[], otherLegHistory:[], lastWarningTime:0, warningShown:false },
-  lastCalibrationSpeak: 0,
-  patientTracking: { patientLandmarks:null, helperDetected:false, patientConfidence:0, framesSincePatient:0, patientBoundingBox:null, calibrationPersonId:null }
+// Session state
+const exState = {
+  leg:'left',
+  legIndices:{ hip:24, knee:26, ankle:28 },
+  phase:'STANDING',
+  validReps:0, totalReps:0,
+  rep:{ minAngle:180,maxFlexion:0,startHipY:0,hipVariance:0,hyperextended:false,angleHistory:[],lastAngle:180,lastVelocity:0,maxJerk:0 },
+  sumRoM:0, sumDuration:0, bestROM:0, totalScore:0,
+  repLogs:[],
+  issues:{ incompleteROM:0,tooFast:0,tooSlow:0,hyperextension:0,hipStability:0,jerky:0,wrongLeg:0 },
+  isCalibrating:false, calibrationStartTime:0, calibrationStableTime:0, calibrationData:[],
+  isCalibrated:false, repStartTime:0,
+  stabilityWarnings:0,
+  wrongLeg:{ selHistory:[],otherHistory:[],lastWarnTime:0 },
+  lastCalSpeak:0
 };
-let currentSessionData = null;
-let pose = null, camera = null;
-let isPaused = false;
+let exSessionData = null;
+let exPose = null, exCamera = null, exIsPaused = false;
+let exSelectedLeg = 'left';
+
+// ── LEG SELECTION ──
+function exSelectLeg(leg) {
+  exSelectedLeg = leg;
+  const lBtn = document.getElementById('legBtnLeft');
+  const rBtn = document.getElementById('legBtnRight');
+  if (lBtn) {
+    lBtn.style.background = leg==='left' ? 'var(--gm)' : 'var(--w)';
+    lBtn.style.color      = leg==='left' ? '#fff'      : 'var(--txt)';
+    lBtn.style.borderColor= leg==='left' ? 'var(--gm)' : 'var(--bdr)';
+  }
+  if (rBtn) {
+    rBtn.style.background = leg==='right' ? 'var(--gm)' : 'var(--w)';
+    rBtn.style.color      = leg==='right' ? '#fff'      : 'var(--txt)';
+    rBtn.style.borderColor= leg==='right' ? 'var(--gm)' : 'var(--bdr)';
+  }
+}
+
+// ── START SESSION ──
+function startExerciseSession() {
+  // Set leg
+  exState.leg = exSelectedLeg;
+  exState.legIndices = exSelectedLeg==='left' ? {hip:24,knee:26,ankle:28} : {hip:23,knee:25,ankle:27};
+  // Reset state
+  exResetState();
+  // Show live view
+  document.getElementById('exSetupView').style.display  = 'none';
+  document.getElementById('exLiveView').style.display   = 'flex';
+  document.getElementById('exCompleteView').style.display = 'none';
+  // Init MediaPipe
+  if (!exPose) {
+    exSetupMediaPipe();
+    setTimeout(exStartCalibration, 1500);
+  } else {
+    exStartCalibration();
+  }
+}
+
+// Keep backward compat — startLive() calls startExerciseSession()
+function startLive() { startExerciseSession(); }
+
+// ── MEDIAPIPE SETUP ──
+function exSetupMediaPipe() {
+  exPose = new Pose({ locateFile: f => 'https://cdn.jsdelivr.net/npm/@mediapipe/pose/' + f });
+  exPose.setOptions({ modelComplexity:1, smoothLandmarks:true, minDetectionConfidence:0.5, minTrackingConfidence:0.5 });
+  exPose.onResults(exOnResults);
+  const video = document.getElementById('ex_video');
+  exCamera = new Camera(video, {
+    onFrame: async () => { if (!exIsPaused && exPose) await exPose.send({image:video}); },
+    width:640, height:480
+  });
+  exCamera.start().catch(e => exShowCoaching('Camera error: '+e.message,'warning'));
+}
+
+// ── CALIBRATION ──
+function exStartCalibration() {
+  exState.isCalibrating = true;
+  exState.calibrationStartTime = performance.now()/1000;
+  exState.calibrationStableTime = 0;
+  exState.calibrationData = [];
+  exState.lastCalSpeak = 0;
+  exState.isCalibrated = false;
+  const overlay = document.getElementById('ex_calOverlay');
+  if (overlay) { overlay.style.display='flex'; }
+  const legEl = document.getElementById('ex_calLeg');
+  if (legEl) legEl.textContent = exState.leg.toUpperCase();
+  exSetCalStatus('Searching…','');
+  exSetCalTimer(CONFIG.STABILITY.CALIBRATION_DURATION);
+  document.getElementById('ex_calProgress').style.width='0%';
+  document.getElementById('ex_calHint').textContent='Position your leg in view';
+  document.getElementById('ex_calAngle').textContent='Current: --°';
+  speak('Starting calibration for '+exState.leg+' leg. Stand straight.','high');
+}
+
+function exCompleteCalibration() {
+  exState.isCalibrating = false;
+  exState.isCalibrated  = true;
+  document.getElementById('ex_calOverlay').style.display='none';
+  document.getElementById('ex_pauseBtn').disabled = false;
+  speak('Calibration complete. Begin exercise.','high');
+  exShowCoaching('Calibration done — begin!','success');
+}
+
+function exSetCalStatus(text, cls) {
+  const el = document.getElementById('ex_calStatus');
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = cls==='detected' ? '#68D391' : cls==='error' ? '#F87171' : '#68D391';
+  el.style.borderColor = cls==='detected' ? 'rgba(104,211,145,0.5)' : cls==='error' ? 'rgba(248,113,113,0.5)' : 'rgba(104,211,145,0.3)';
+}
+
+function exSetCalTimer(v) {
+  const el = document.getElementById('ex_calTimer');
+  if (el) el.textContent = v.toFixed(1);
+}
+
+// ── MAIN onResults CALLBACK ──
+function exOnResults(results) {
+  const canvas = document.getElementById('ex_canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const vw  = results.image.width  || 640;
+  const vh  = results.image.height || 480;
+  if (canvas.width!==vw||canvas.height!==vh){ canvas.width=vw; canvas.height=vh; }
+
+  ctx.save();
+  ctx.clearRect(0,0,vw,vh);
+  // Mirror horizontally to match video
+  ctx.translate(vw,0); ctx.scale(-1,1);
+  ctx.drawImage(results.image,0,0,vw,vh);
+  ctx.restore();
+
+  if (!results.poseLandmarks) return;
+  const lm  = results.poseLandmarks;
+  const idx = exState.legIndices;
+  const hip   = lm[idx.hip];
+  const knee  = lm[idx.knee];
+  const ankle = lm[idx.ankle];
+  if (!hip||!knee||!ankle) return;
+
+  ctx.save();
+  ctx.translate(vw,0); ctx.scale(-1,1);
+
+  if (exState.isCalibrating) {
+    exProcessCalibration(lm, hip, knee, ankle, vw, vh, ctx);
+  } else if (exState.isCalibrated) {
+    exProcessExercise(lm, vw, vh, ctx);
+    exCheckWrongLeg(lm);
+  } else {
+    exDrawSkeleton(ctx, lm, vw, vh, 'rgba(104,211,145,0.6)');
+  }
+  ctx.restore();
+}
+
+// ── CALIBRATION FRAME ──
+function exProcessCalibration(lm, hip, knee, ankle, vw, vh, ctx) {
+  const now    = performance.now()/1000;
+  const elapsed = now - exState.calibrationStartTime;
+  const geoAngle = exCalcAngle(hip, knee, ankle);
+  const anaAngle = 180 - geoAngle;
+  document.getElementById('ex_calAngle').textContent = 'Current: '+Math.round(anaAngle)+'°';
+
+  const isStraight = anaAngle >= CONFIG.ROM.CALIBRATION_MIN && anaAngle <= CONFIG.ROM.CALIBRATION_MAX;
+  const isStable   = exCheckCalStability(hip, knee, ankle);
+  const nowMs = now * 1000;
+
+  if (isStraight && isStable) {
+    if (exState.calibrationStableTime < 0.1 && nowMs - exState.lastCalSpeak > 2000) {
+      speak('Good. Hold steady.','high'); exState.lastCalSpeak = nowMs;
+    }
+    exState.calibrationStableTime += 0.033;
+    const pct = Math.min(100, exState.calibrationStableTime / CONFIG.STABILITY.CALIBRATION_DURATION * 100);
+    exSetCalStatus('Position Good ✓','detected');
+    document.getElementById('ex_calHint').textContent='Hold steady…';
+    exSetCalTimer(Math.max(0, CONFIG.STABILITY.CALIBRATION_DURATION - exState.calibrationStableTime));
+    document.getElementById('ex_calProgress').style.width = pct+'%';
+    if (exState.calibrationStableTime >= CONFIG.STABILITY.CALIBRATION_DURATION) exCompleteCalibration();
+  } else {
+    exState.calibrationStableTime = 0;
+    exSetCalTimer(CONFIG.STABILITY.CALIBRATION_DURATION);
+    document.getElementById('ex_calProgress').style.width='0%';
+    if (!isStraight) {
+      exSetCalStatus(anaAngle<0 ? "Don't lock knee" : 'Straighten more','error');
+      document.getElementById('ex_calHint').textContent = 'Angle: '+Math.round(anaAngle)+'° (need 0–10°)';
+    } else {
+      exSetCalStatus('Too much movement','error');
+      document.getElementById('ex_calHint').textContent='Hold still';
+    }
+  }
+  if (elapsed > 30) { speak('Calibration timeout. Try again.','high'); exStartCalibration(); }
+  exDrawSkeleton(ctx, lm, vw, vh, isStraight && isStable ? '#68D391' : '#F6AD55');
+}
+
+function exCheckCalStability(hip, knee, ankle) {
+  exState.calibrationData.push({hip,knee,ankle});
+  if (exState.calibrationData.length > 10) exState.calibrationData.shift();
+  if (exState.calibrationData.length < 5) return true;
+  const hipVar = exVariance(exState.calibrationData.map(d=>d.hip.x)) + exVariance(exState.calibrationData.map(d=>d.hip.y));
+  const kneVar = exVariance(exState.calibrationData.map(d=>d.knee.x)) + exVariance(exState.calibrationData.map(d=>d.knee.y));
+  return (hipVar+kneVar) < CONFIG.STABILITY.CALIBRATION_TOLERANCE;
+}
+
+function exVariance(vals) {
+  const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
+  return Math.sqrt(vals.map(v=>Math.pow(v-mean,2)).reduce((a,b)=>a+b,0)/vals.length);
+}
+
+// ── EXERCISE FRAME ──
+function exProcessExercise(lm, vw, vh, ctx) {
+  const now = performance.now()/1000;
+  const idx = exState.legIndices;
+  const hip=lm[idx.hip], knee=lm[idx.knee], ankle=lm[idx.ankle];
+  if (!hip||!knee||!ankle||hip.visibility<0.5){ exShowCoaching('Leg not visible','warning'); return; }
+
+  const geoAngle = exCalcAngle(hip,knee,ankle);
+  const anaAngle = 180 - geoAngle;
+
+  exUpdateSmoothness(geoAngle);
+  const smooth = exGetSmoothness();
+
+  // Update live HUD
+  document.getElementById('ex_angleVal').textContent = Math.round(anaAngle)+'°';
+  document.getElementById('ex_hipStab').textContent  = exState.rep.hipVariance < CONFIG.STABILITY.HIP_THRESHOLD ? 'Stable' : 'Unstable';
+
+  if (anaAngle < CONFIG.ROM.MAX_SAFE) { exState.rep.hyperextended=true; exShowCoaching("Don't lock knee",'warning'); }
+
+  // Rep state machine
+  if (exState.phase==='STANDING' && anaAngle>CONFIG.ROM.STAND_THRESHOLD) {
+    exStartRep(now, anaAngle, hip.y);
+  } else if (exState.phase!=='STANDING') {
+    exUpdateRep(anaAngle, geoAngle, hip.y);
+    if (exState.phase==='ASCENDING' && anaAngle<CONFIG.ROM.STAND_THRESHOLD) exFinishRep(now, smooth);
+    // timeout
+    if (now - exState.repStartTime > CONFIG.TIMEOUT) exCancelRep(now);
+  }
+  exDrawSkeleton(ctx, lm, vw, vh, '#68D391');
+}
+
+function exStartRep(now, angle, hipY) {
+  exState.phase='DESCENDING'; exState.repStartTime=now;
+  exResetRepData(); exState.rep.maxFlexion=angle; exState.rep.startHipY=hipY;
+  exShowCoaching('Lower slowly','info');
+}
+
+function exUpdateRep(anaAngle, geoAngle, hipY) {
+  const r=exState.rep;
+  if (anaAngle>r.maxFlexion){ r.maxFlexion=anaAngle; r.minAngle=geoAngle; }
+  r.hipVariance = Math.max(r.hipVariance, Math.abs(hipY - r.startHipY));
+  if (exState.phase==='DESCENDING' && anaAngle>CONFIG.ROM.DEEP_THRESHOLD){ exState.phase='ASCENDING'; exShowCoaching('Extend up','info'); }
+}
+
+function exFinishRep(now, smooth) {
+  exState.phase='STANDING'; exState.totalReps++;
+  const r=exState.rep;
+  const duration=now-exState.repStartTime;
+  const rom=r.maxFlexion;
+  const hipOk=r.hipVariance<CONFIG.STABILITY.HIP_THRESHOLD;
+  const jerky=r.maxJerk>CONFIG.STABILITY.JERK_THRESHOLD;
+  const issues={ incompleteROM:rom<50, tooFast:duration<CONFIG.SPEED.MIN_TIME, tooSlow:duration>CONFIG.SPEED.MAX_TIME, hyperextension:r.hyperextended, hipStability:!hipOk, jerky };
+  const valid=!issues.incompleteROM&&!issues.tooFast&&!issues.tooSlow;
+  Object.entries(issues).forEach(([k,v])=>{ if(v) exState.issues[k]++; });
+  const score=exCalcScore(duration,rom,smooth,hipOk,r.hyperextended);
+  if (valid){ exState.validReps++; exState.sumRoM+=rom; exState.sumDuration+=duration; exState.totalScore+=score; if(rom>exState.bestROM) exState.bestROM=rom; }
+  exUpdateHUD(score);
+  exShowCoaching(valid?'Good rep':exGetIssueText(issues), valid?'success':'warning');
+  document.getElementById('ex_repCount').textContent  = exState.validReps;
+  document.getElementById('ex_totalReps').textContent = exState.validReps+'/'+exState.totalReps;
+  document.getElementById('ex_romVal').textContent    = Math.round(exState.bestROM)+'°';
+}
+
+function exCancelRep(now) {
+  exState.phase='STANDING'; exState.totalReps++;
+  document.getElementById('ex_totalReps').textContent = exState.validReps+'/'+exState.totalReps;
+  exShowCoaching('Too slow — try again','warning');
+}
+
+function exCalcScore(duration, rom, smooth, hipOk, hyper) {
+  let s = Math.min(100,rom/70*100)*0.4;
+  s += (duration>=2.5&&duration<=4?100:duration>=2&&duration<=6?70:40)*0.3;
+  let ctrl=smooth; if(!hipOk) ctrl*=0.7; if(hyper) ctrl*=0.5; s+=ctrl*0.3;
+  return Math.round(s);
+}
+
+function exGetIssueText(issues) {
+  if(issues.incompleteROM) return 'Bend more';
+  if(issues.tooFast)       return 'Slow down';
+  if(issues.tooSlow)       return 'Speed up';
+  if(issues.jerky)         return 'Control it';
+  if(issues.hipStability)  return 'Stabilize hip';
+  if(issues.hyperextension)return "Don't lock";
+  return 'Check form';
+}
+
+function exUpdateSmoothness(angle) {
+  const r=exState.rep, vel=angle-r.lastAngle, jerk=Math.abs(vel-r.lastVelocity);
+  r.angleHistory.push({angle,vel,jerk});
+  if(r.angleHistory.length>CONFIG.STABILITY.SMOOTHNESS_WINDOW) r.angleHistory.shift();
+  r.maxJerk=Math.max(r.maxJerk,jerk); r.lastAngle=angle; r.lastVelocity=vel;
+}
+
+function exGetSmoothness() {
+  const h=exState.rep.angleHistory;
+  if(h.length<5) return 100;
+  const avg=h.reduce((a,b)=>a+b.jerk,0)/h.length;
+  return Math.max(0,100-avg*5);
+}
+
+function exUpdateHUD(score) {
+  const el=document.getElementById('ex_qualScore');
+  if(el){ el.textContent=score; el.style.color=score>80?'#68D391':score>60?'#4FC3F7':'#F6AD55'; }
+}
+
+// ── WRONG LEG DETECTION ──
+function exCheckWrongLeg(lm) {
+  const selIdx = exState.legIndices;
+  const otherIdx = exState.leg==='left' ? {hip:23,knee:25,ankle:27} : {hip:24,knee:26,ankle:28};
+  const selK   = lm[selIdx.knee];
+  const otherK = lm[otherIdx.knee];
+  if (!selK||!otherK) return;
+  const selMov   = Math.abs(selK.x);
+  const otherMov = Math.abs(otherK.x - (exState.wrongLeg.lastOtherX||otherK.x));
+  exState.wrongLeg.lastOtherX = otherK.x;
+  const now = Date.now();
+  const warn = document.getElementById('ex_wrongLeg');
+  if (!warn) return;
+  if (otherMov > selMov * 1.5 && now - exState.wrongLeg.lastWarnTime > CONFIG.WRONG_LEG_DETECTION.COOLDOWN_MS) {
+    exState.wrongLeg.lastWarnTime = now;
+    exState.issues.wrongLeg++;
+    warn.style.display='block';
+    speak('Wrong leg detected','high');
+    setTimeout(()=>{ warn.style.display='none'; }, 2000);
+  }
+}
+
+// ── DRAW SKELETON ──
+function exDrawSkeleton(ctx, lm, vw, vh, color) {
+  const idx=exState.legIndices;
+  const hip=lm[idx.hip], knee=lm[idx.knee], ankle=lm[idx.ankle];
+  if(!hip||!knee||!ankle) return;
+  ctx.strokeStyle=color; ctx.lineWidth=5; ctx.lineCap='round';
+  ctx.beginPath();
+  ctx.moveTo(hip.x*vw,hip.y*vh);
+  ctx.lineTo(knee.x*vw,knee.y*vh);
+  ctx.lineTo(ankle.x*vw,ankle.y*vh);
+  ctx.stroke();
+  ctx.fillStyle=color;
+  [hip,knee,ankle].forEach(p=>{ ctx.beginPath(); ctx.arc(p.x*vw,p.y*vh,7,0,Math.PI*2); ctx.fill(); });
+  // Angle label
+  if(knee){
+    ctx.fillStyle='#fff'; ctx.font='bold 20px "Roboto Mono", monospace';
+    const geo=exCalcAngle(hip,knee,ankle);
+    ctx.fillText(Math.round(180-geo)+'°', knee.x*vw+14, knee.y*vh-10);
+  }
+}
+
+// ── COACHING HUD ──
+function exShowCoaching(text, type) {
+  const hud=document.getElementById('ex_coachingHud');
+  const txt=document.getElementById('ex_coachingTxt');
+  if(!hud||!txt) return;
+  txt.textContent=text;
+  hud.style.opacity='1';
+  hud.style.background = type==='success'?'rgba(27,67,50,0.9)' : type==='warning'?'rgba(185,28,28,0.85)' : 'rgba(27,67,50,0.85)';
+  setTimeout(()=>{ hud.style.opacity='0'; }, 2500);
+  const vs = { success:['Good rep.','Excellent.','Well done.'], warning:{ 'Bend more':'Bend more.','Slow down':'Slow down.','Speed up':'Speed up.','Control it':'Move smoothly.','Stabilize hip':'Keep hip stable.','Too slow':'Too slow.','Leg not visible':'Leg not visible.' } };
+  if(type==='success') speak(vs.success[Math.floor(Math.random()*3)],'normal');
+  else if(type==='warning') speak(vs.warning[text]||text,'high');
+  else if(text==='Lower slowly') speak('Lower slowly.','normal');
+  else if(text==='Extend up') speak('Extend up.','normal');
+}
+
+// ── PAUSE / END ──
+function exTogglePause() {
+  exIsPaused = !exIsPaused;
+  const btn=document.getElementById('ex_pauseBtn');
+  if(btn) btn.textContent = exIsPaused ? '▶ Resume' : '⏸ Pause';
+}
+
+function exEndSession() {
+  if (exState.validReps===0) {
+    exShowCoaching('Complete at least 1 rep','warning');
+    speak('Please complete at least one repetition.','high');
+    return;
+  }
+  // Stop camera
+  exIsPaused = true;
+  // Build session data
+  const avgRom   = Math.round(exState.sumRoM / exState.validReps);
+  const avgTime  = (exState.sumDuration / exState.validReps).toFixed(1);
+  const avgScore = Math.round(exState.totalScore / exState.validReps);
+  const successRate = Math.round(exState.validReps / exState.totalReps * 100);
+
+  exSessionData = {
+    date:new Date().toLocaleString(), leg:exState.leg.toUpperCase(),
+    validReps:exState.validReps, totalReps:exState.totalReps, successRate,
+    avgRom, bestRom:Math.round(exState.bestROM), avgTime, score:avgScore,
+    issues:{...exState.issues}, stabilityWarnings:exState.stabilityWarnings
+  };
+
+  // Save to Supabase
+  exSaveToSupabase(exSessionData);
+
+  // Show complete screen
+  document.getElementById('exLiveView').style.display    = 'none';
+  document.getElementById('exCompleteView').style.display = 'flex';
+
+  // Populate complete screen
+  document.getElementById('exCompReps').textContent    = exState.validReps;
+  document.getElementById('exCompQuality').textContent = avgScore+'%';
+  document.getElementById('exCompROM').textContent     = Math.round(exState.bestROM)+'°';
+  document.getElementById('exCompSub').textContent     = avgScore>=80?'Excellent session! 🔥':avgScore>=60?'Good effort! Keep going 💪':'Session complete. Keep practising!';
+
+  // AI summary
+  const issueList = Object.entries(exState.issues).filter(([k,v])=>v>0).map(([k,v])=>`${k.replace(/([A-Z])/g,' $1')}: ${v} reps`);
+  const summary = exState.validReps>0
+    ? (avgScore>=80?'Great session! ROM and technique were strong.':avgScore>=60?'Good session. '+(issueList.length?'Focus on: '+issueList.slice(0,2).join(', '):'Keep practising.'):'Try to be more consistent. '+(issueList.length?'Main issues: '+issueList.slice(0,2).join(', '):''))
+    : 'No valid reps recorded.';
+  document.getElementById('exCompAISummary').textContent = summary;
+
+  speak('Session complete. '+exState.validReps+' valid reps. Score '+avgScore,'high');
+}
+
+// ── SAVE TO SUPABASE ──
+async function exSaveToSupabase(data) {
+  if (!window._currentUser || !window._sb) return;
+  try {
+    await _sb.from('sessions').insert({
+      user_id:             window._currentUser.id,
+      session_date:        new Date().toISOString(),
+      leg:                 data.leg,
+      valid_reps:          data.validReps,
+      total_reps:          data.totalReps,
+      success_rate:        data.successRate,
+      avg_rom:             data.avgRom,
+      best_rom:            data.bestRom,
+      avg_time:            parseFloat(data.avgTime),
+      score:               data.score,
+      stability_warnings:  data.stabilityWarnings,
+      issue_incomplete_rom:data.issues.incompleteROM||0,
+      issue_too_fast:      data.issues.tooFast||0,
+      issue_too_slow:      data.issues.tooSlow||0,
+      issue_hyperextension:data.issues.hyperextension||0,
+      issue_hip_stability: data.issues.hipStability||0,
+      issue_jerky:         data.issues.jerky||0,
+      issue_wrong_leg:     data.issues.wrongLeg||0
+    });
+    document.getElementById('exCompNote').textContent = 'Session saved to your record ✓';
+  } catch(e) { console.warn('Session save failed:', e.message); }
+}
+
+// ── REPORT / PDF ──
+function exDownloadPDF() {
+  if (!exSessionData) return;
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setFillColor(27,67,50); doc.rect(0,0,210,35,'F');
+    doc.setTextColor(255,255,255); doc.setFontSize(24); doc.setFont('helvetica','bold');
+    doc.text('HEALIFY',20,25);
+    doc.setFontSize(10); doc.text(exSessionData.date,150,15);
+    doc.setTextColor(80,80,80); doc.setFontSize(14); doc.text('SESSION REPORT',20,50);
+    let y=65; doc.setFontSize(11);
+    const add=(lbl,val)=>{ doc.setFont('helvetica','bold'); doc.text(lbl+':',20,y); doc.setFont('helvetica','normal'); doc.text(String(val),80,y); y+=10; };
+    add('Leg',exSessionData.leg); add('Valid Reps',exSessionData.validReps+'/'+exSessionData.totalReps);
+    add('Success Rate',exSessionData.successRate+'%'); add('Avg ROM',exSessionData.avgRom+'°');
+    add('Best ROM',exSessionData.bestRom+'°'); add('Avg Time',exSessionData.avgTime+'s');
+    add('Quality Score',exSessionData.score+'/100');
+    doc.save('healify-session-'+Date.now()+'.pdf');
+  } catch(e) { console.error('PDF error:',e); }
+}
+
+async function exSendReport() {
+  const email=document.getElementById('exCompEmail')?.value.trim();
+  const status=document.getElementById('exEmailStatus');
+  if (!email||!email.includes('@')) { if(status) status.textContent='Enter a valid email'; return; }
+  if(status) status.textContent='Sending…';
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.text('Healify Session Report',20,20); doc.text(exSessionData.date,20,35);
+    const pdfBase64 = doc.output('datauristring').split(',')[1];
+    await emailjs.send(EMAILJS_CONFIG.SERVICE_ID, EMAILJS_CONFIG.TEMPLATE_ID,{
+      to_email:email, from_name:'Healify',
+      subject:'Healify Report - '+exSessionData.leg+' Leg',
+      message:'Valid reps: '+exSessionData.validReps+'\nScore: '+exSessionData.score+'\nBest ROM: '+exSessionData.bestRom+'°',
+      attachment:pdfBase64
+    });
+    if(status) status.textContent='Sent to '+email+' ✓';
+  } catch(e) { if(status) status.textContent='Failed — try downloading instead'; }
+}
+
+function exGoHome() {
+  document.getElementById('exCompleteView').style.display='none';
+  document.getElementById('exSetupView').style.display='flex';
+  // Stop camera
+  if (exCamera) { try { exCamera.stop(); } catch(e){} exCamera=null; exPose=null; }
+  exIsPaused=false;
+  exResetState();
+  nav('home');
+  refreshHomeStats();
+}
+
+// ── RESET HELPERS ──
+function exResetState() {
+  Object.assign(exState,{
+    phase:'STANDING',validReps:0,totalReps:0,sumRoM:0,sumDuration:0,bestROM:0,totalScore:0,
+    repLogs:[],isCalibrating:false,calibrationStartTime:0,calibrationStableTime:0,
+    calibrationData:[],isCalibrated:false,repStartTime:0,stabilityWarnings:0,
+    issues:{incompleteROM:0,tooFast:0,tooSlow:0,hyperextension:0,hipStability:0,jerky:0,wrongLeg:0},
+    wrongLeg:{selHistory:[],otherHistory:[],lastWarnTime:0}
+  });
+  exResetRepData();
+  exIsPaused=false;
+}
+
+function exResetRepData() {
+  exState.rep = {minAngle:180,maxFlexion:0,startHipY:0,hipVariance:0,hyperextended:false,angleHistory:[],lastAngle:180,lastVelocity:0,maxJerk:0};
+}
+
+function exCalcAngle(a,b,c) {
+  const rad = Math.atan2(c.y-b.y,c.x-b.x) - Math.atan2(a.y-b.y,a.x-b.x);
+  let ang = Math.abs(rad*180/Math.PI);
+  return ang>180 ? 360-ang : ang;
+}
 
 // ═══════════════════════════════════════════════
 // NAVIGATION
@@ -1986,30 +2522,6 @@ function setupMediaPipe() {
 // ═══════════════════════════════════════════════
 // START LIVE SESSION
 // ═══════════════════════════════════════════════
-function startLive() {
-  // Set leg into state
-  state.leg = selectedLeg;
-  state.legIndices = selectedLeg==='left' ? {hip:24,knee:26,ankle:28} : {hip:23,knee:25,ankle:27};
-
-  // Show overlay
-  document.getElementById('liveOverlay').classList.add('show');
-
-  // Reset state
-  resetSessionState();
-  resetHUD();
-
-  document.getElementById('liveExName').textContent = 'Straight Leg Raise';
-  document.getElementById('liveProgTxt').textContent = 'Calibrating — hold your leg straight…';
-  document.getElementById('aiFeedback').textContent = 'Initialising camera…';
-
-  // Init MediaPipe if not already done
-  if (!pose) {
-    setupMediaPipe();
-    setTimeout(startCalibration, 2000);
-  } else {
-    startCalibration();
-  }
-}
 
 function resetHUD() {
   document.getElementById('repCount').textContent = '0';
