@@ -34,11 +34,16 @@ window.addEventListener('load', function() {
       window._currentUser = session.user;
       document.getElementById('verifyScreen')?.classList.remove('show');
       if (typeof loadAllUserData === 'function') await loadAllUserData(session.user.id);
-      if (typeof showApp === 'function') showApp();
+      // Defer so second script block is fully parsed before calling nav/render functions
+      setTimeout(() => {
+        if (typeof showApp === 'function') showApp();
+      }, 100);
     } else {
       window._currentUser = null;
       window._userProfile = null;
-      if (typeof showAuthScreen === 'function') showAuthScreen();
+      setTimeout(() => {
+        if (typeof showAuthScreen === 'function') showAuthScreen();
+      }, 100);
     }
   });
 });
@@ -136,7 +141,7 @@ async function loadAllUserData(uid) {
 
     // 8. Latest physio note
     const { data: noteRows } = await _sb
-      .from('physio_notes')
+      .from('admin_notes')
       .select('*')
       .eq('patient_id', uid)
       .order('created_at', { ascending: false })
@@ -615,10 +620,11 @@ function showApp() {
   document.getElementById('authScreen')?.classList.add('hidden');
   document.getElementById('verifyScreen')?.classList.remove('show');
   document.getElementById('appRoot')?.classList.add('visible');
-  injectDesktopSidebar();
-  nav('home');
-  refreshHomeStats();
-  try { initTTS(); } catch(e) {}
+  // Functions in second script block — call safely
+  if (typeof injectDesktopSidebar === 'function') injectDesktopSidebar();
+  if (typeof nav === 'function') nav('home');
+  if (typeof refreshHomeStats === 'function') refreshHomeStats();
+  if (typeof initTTS === 'function') { try { initTTS(); } catch(e) {} }
 }
 
 function showAuthScreen() {
