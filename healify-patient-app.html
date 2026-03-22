@@ -33,17 +33,19 @@ window.addEventListener('load', function() {
       }
       window._currentUser = session.user;
       document.getElementById('verifyScreen')?.classList.remove('show');
+      document.getElementById('authScreen')?.classList.add('hidden');
+      // Show loading spinner while fetching user data
+      const ls = document.getElementById('loadingScreen');
+      if (ls) ls.style.display = 'flex';
       if (typeof loadAllUserData === 'function') await loadAllUserData(session.user.id);
-      // Defer so second script block is fully parsed before calling nav/render functions
-      setTimeout(() => {
-        if (typeof showApp === 'function') showApp();
-      }, 100);
+      if (ls) ls.style.display = 'none';
+      if (typeof showApp === 'function') showApp();
     } else {
       window._currentUser = null;
       window._userProfile = null;
-      setTimeout(() => {
-        if (typeof showAuthScreen === 'function') showAuthScreen();
-      }, 100);
+      const ls2 = document.getElementById('loadingScreen');
+      if (ls2) ls2.style.display = 'none';
+      if (typeof showAuthScreen === 'function') showAuthScreen();
     }
   });
 });
@@ -620,11 +622,10 @@ function showApp() {
   document.getElementById('authScreen')?.classList.add('hidden');
   document.getElementById('verifyScreen')?.classList.remove('show');
   document.getElementById('appRoot')?.classList.add('visible');
-  // Functions in second script block — call safely
-  if (typeof injectDesktopSidebar === 'function') injectDesktopSidebar();
-  if (typeof nav === 'function') nav('home');
-  if (typeof refreshHomeStats === 'function') refreshHomeStats();
-  if (typeof initTTS === 'function') { try { initTTS(); } catch(e) {} }
+  // Signal to second script block that app should initialize
+  window._appShouldInit = true;
+  // Try immediately — may work if second block already loaded
+  if (typeof _initAppUI === 'function') _initAppUI();
 }
 
 function showAuthScreen() {
@@ -1456,6 +1457,14 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
   </div>
 </div>
 
+<!-- ══ LOADING OVERLAY ══ -->
+<div id="loadingScreen" style="display:none;position:fixed;inset:0;z-index:9990;background:linear-gradient(150deg,var(--gd),var(--gm));align-items:center;justify-content:center;flex-direction:column;gap:16px;">
+  <div style="font-size:48px;">💚</div>
+  <div style="font-size:22px;font-weight:900;color:#fff;letter-spacing:-0.3px;">Healify</div>
+  <div style="width:40px;height:40px;border:3px solid rgba(255,255,255,0.2);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+  <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+</div>
+
 <!-- ══ MAIN APP ══ -->
 <div id="appRoot">
 <div class="device-wrap">
@@ -1956,6 +1965,22 @@ function nav(page) {
   });
 }
 function goEx() { nav('exercise'); }
+
+// ═══════════════════════════════════════════════
+// APP UI INIT — called after login, safe to call multiple times
+// ═══════════════════════════════════════════════
+window._initAppUI = function() {
+  try { initTTS(); } catch(e) {}
+  try { injectDesktopSidebar(); } catch(e) {}
+  nav('home');
+  refreshHomeStats();
+  window._appShouldInit = false;
+};
+
+// If showApp already fired before this block loaded, init now
+if (window._appShouldInit) {
+  window._initAppUI();
+}
 
 // ═══════════════════════════════════════════════
 // LEG SELECTION (UI level)
