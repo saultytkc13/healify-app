@@ -12,8 +12,8 @@
 // 🔑 PASTE YOUR SUPABASE CREDENTIALS HERE
 // Supabase Dashboard → Project Settings → API
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const SUPABASE_URL  = 'https://mbkmjhyeccywsbabmbss.supabase.co';       // e.g. https://xyzabc.supabase.co
-const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ia21qaHllY2N5d3NiYWJtYnNzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxMzQ4MzUsImV4cCI6MjA4OTcxMDgzNX0.ww8IIV1yoNWHzV-fOOFSmIXSp1xUv-L47VyEhubrLQA';  // long string starting with eyJ...
+const SUPABASE_URL  = 'PASTE_YOUR_SUPABASE_URL';       // e.g. https://xyzabc.supabase.co
+const SUPABASE_ANON = 'PASTE_YOUR_SUPABASE_ANON_KEY';  // long string starting with eyJ...
 
 const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
@@ -430,29 +430,43 @@ window.logPain = async function(val) {
 // ══════════════════════════════════════════════════════
 
 window.fbRegister = async function(name, email, password, age, condition, city, surgeon, surgeryDate, planDuration) {
-  // 1. Create auth user (no email confirmation required)
-  const { data, error } = await _sb.auth.signUp({ email, password });
-  if (error) throw error;
-  // 2. Upsert profile
-  const { error: pErr } = await _sb.from('profiles').upsert({
-    id:            data.user.id,
-    email,
-    name,
-    age:           age ? parseInt(age) : null,
-    condition,
-    city,
-    surgeon:       surgeon || null,
-    surgery_date:  surgeryDate || null,
-    plan_duration: planDuration || 30,
-    role:          'patient'
+  // 1. Sign up — email confirmation will be sent by Supabase automatically
+  const { data, error } = await _sb.auth.signUp({
+    email: email.toLowerCase().trim(),
+    password,
+    options: {
+      data: { name } // store name in auth metadata too
+    }
   });
-  if (pErr) console.warn('Profile upsert:', pErr);
+  if (error) throw new Error(error.message);
+  if (!data?.user) throw new Error('Account creation failed — please try again');
+
+  // 2. Upsert profile with all details
+  const profileData = {
+    id:            data.user.id,
+    email:         email.toLowerCase().trim(),
+    name:          name || '',
+    role:          'patient'
+  };
+  // Only add optional fields if they have values
+  if (age)         profileData.age          = parseInt(age);
+  if (condition)   profileData.condition    = condition;
+  if (city)        profileData.city         = city;
+  if (surgeon)     profileData.surgeon      = surgeon;
+  if (surgeryDate) profileData.surgery_date = surgeryDate;
+  if (planDuration) profileData.plan_duration = planDuration;
+
+  const { error: pErr } = await _sb.from('profiles').upsert(profileData, { onConflict: 'id' });
+  if (pErr) console.warn('Profile save warning (non-fatal):', pErr.message);
   return data;
 };
 
 window.fbLogin = async function(email, password) {
-  const { data, error } = await _sb.auth.signInWithPassword({ email, password });
-  if (error) throw error;
+  const { data, error } = await _sb.auth.signInWithPassword({
+    email: email.toLowerCase().trim(),
+    password
+  });
+  if (error) throw new Error(error.message);
   return data;
 };
 
@@ -952,7 +966,7 @@ body{
     <div class="verify-ico">📬</div>
     <div class="verify-title">Check your email</div>
     <div class="verify-sub">We sent a verification link to:</div>
-    <div class="verify-email-show" id="verifyEmailAddr">your@email.com</div>
+    <div class="verify-email-show" id="verifyEmailAddr"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="98e1f7edead8fdf5f9f1f4b6fbf7f5">[email&#160;protected]</a></div>
     <div class="verify-steps">
       <div class="verify-step"><div class="verify-step-num">1</div><div>Open your email inbox — check spam if you don't see it within 1 minute</div></div>
       <div class="verify-step"><div class="verify-step-num">2</div><div>Click the <strong>Confirm your email</strong> link in the Healify email</div></div>
@@ -1060,7 +1074,7 @@ body{
   <div class="notch"></div>
 
   <!-- ══ PAGE 1: HOME ══ -->
-  <div class="screen active" id="pg-home">
+  <div class="screen" id="pg-home">
     <div class="home-hero">
       <div class="sbar h-sbar"><span>9:41</span><div style="display:flex;gap:4px;font-size:11px">📶 🔋</div></div>
       <div class="h-top">
@@ -1449,7 +1463,7 @@ body{
 </div><!-- end phone -->
 </div><!-- end device-wrap -->
 
-<script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 // ═══════════════════════════════════════════════
 // EMAILJS CONFIG (from index.html)
 // ═══════════════════════════════════════════════
@@ -2256,13 +2270,22 @@ function clearHistory() {
 // ═══════════════════════════════════════════════
 function showApp() {
   document.getElementById('authScreen').classList.add('hidden');
+  document.getElementById('verifyScreen').classList.remove('show');
   document.getElementById('appRoot').classList.add('visible');
+  // Always land on home screen after login
+  nav('home');
   refreshHomeStats();
   initTTS();
 }
 function showAuthScreen() {
   document.getElementById('authScreen').classList.remove('hidden');
+  document.getElementById('verifyScreen').classList.remove('show');
   document.getElementById('appRoot').classList.remove('visible');
+  // Reset to login tab
+  switchAuthTab('login');
+  // Reset login button in case it was stuck disabled
+  const btn = document.getElementById('loginBtn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Sign In →'; }
 }
 function showVerifyScreen(email) {
   document.getElementById('verifyEmailAddr').textContent = email || 'your email';
@@ -2312,10 +2335,18 @@ async function doLogin() {
   btn.disabled = true; btn.textContent = 'Signing in…'; errEl.textContent = '';
   try {
     if (window.fbLogin) await window.fbLogin(email, pass);
-    else { showApp(); } // fallback if Firebase not configured
+    else { showApp(); }
   } catch(e) {
-    errEl.textContent = e.code==='auth/invalid-credential' ? 'Wrong email or password' :
-                        e.code==='auth/user-not-found' ? 'No account found' : e.message;
+    const msg = (e.message || '').toLowerCase();
+    if (msg.includes('invalid') || msg.includes('credentials') || msg.includes('wrong')) {
+      errEl.textContent = 'Wrong email or password';
+    } else if (msg.includes('not found') || msg.includes('no user')) {
+      errEl.textContent = 'No account found with this email';
+    } else if (msg.includes('email') && msg.includes('confirm')) {
+      errEl.textContent = 'Please verify your email first — check your inbox';
+    } else {
+      errEl.textContent = e.message || 'Sign in failed — try again';
+    }
     btn.disabled = false; btn.textContent = 'Sign In →';
   }
 }
@@ -2326,31 +2357,45 @@ async function doGoogleLogin() {
   } catch(e) { document.getElementById('loginErr').textContent = e.message; }
 }
 async function doRegister() {
-  const name        = document.getElementById('regName').value.trim();
-  const age         = document.getElementById('regAge').value.trim();
-  const city        = document.getElementById('regCity').value.trim();
-  const condition   = document.getElementById('regCondition').value.trim();
-  const physio      = document.getElementById('regPhysio').value.trim();
-  const email       = document.getElementById('regEmail').value.trim();
-  const pass        = document.getElementById('regPass').value;
-  const surgeon     = document.getElementById('regSurgeon')?.value.trim() || '';
-  const surgeryDate = document.getElementById('regSurgeryDate')?.value || '';
-  const planDays    = document.getElementById('regPlanDays')?.value || '30';
+  // Safely read all fields — use ?. so missing fields don't crash
+  const name        = document.getElementById('regName')?.value.trim()        || '';
+  const age         = document.getElementById('regAge')?.value.trim()         || '';
+  const city        = document.getElementById('regCity')?.value.trim()        || '';
+  const condition   = document.getElementById('regCondition')?.value.trim()   || '';
+  const email       = document.getElementById('regEmail')?.value.trim()       || '';
+  const pass        = document.getElementById('regPass')?.value               || '';
+  const surgeon     = document.getElementById('regSurgeon')?.value.trim()     || '';
+  const surgeryDate = document.getElementById('regSurgeryDate')?.value        || '';
+  const planDays    = document.getElementById('regPlanDays')?.value           || '30';
   const errEl       = document.getElementById('registerErr');
   const btn         = document.getElementById('registerBtn');
-  if (!name||!email||!pass) { errEl.textContent = 'Name, email and password are required'; return; }
+
+  // Validate
+  if (!name)  { errEl.textContent = 'Please enter your full name'; return; }
+  if (!email) { errEl.textContent = 'Please enter your email address'; return; }
+  if (!pass)  { errEl.textContent = 'Please create a password'; return; }
   if (pass.length < 6) { errEl.textContent = 'Password must be at least 6 characters'; return; }
+
   btn.disabled = true; btn.textContent = 'Creating account…'; errEl.textContent = '';
+
   try {
     if (window.fbRegister) {
-      await window.fbRegister(name, email, pass, age, condition, city, surgeon, surgeryDate, parseInt(planDays));
-      // Show email verification screen — user must confirm before logging in
+      await window.fbRegister(name, email, pass, age, condition, city, surgeon, surgeryDate, parseInt(planDays)||30);
       showVerifyScreen(email);
-    } else showApp();
+    } else {
+      showApp();
+    }
   } catch(e) {
     const msg = e.message || '';
-    errEl.textContent = msg.includes('already registered') || msg.includes('already been registered') ? 'Email already registered — sign in instead' :
-                        msg.includes('invalid') ? 'Invalid email address' : msg;
+    if (msg.toLowerCase().includes('already') || msg.toLowerCase().includes('registered')) {
+      errEl.textContent = 'Email already registered — sign in instead';
+    } else if (msg.toLowerCase().includes('invalid email')) {
+      errEl.textContent = 'Invalid email address — check and try again';
+    } else if (msg.toLowerCase().includes('weak password') || msg.toLowerCase().includes('password')) {
+      errEl.textContent = 'Password too weak — use at least 6 characters';
+    } else {
+      errEl.textContent = msg || 'Something went wrong — please try again';
+    }
     btn.disabled = false; btn.textContent = 'Create Account →';
   }
 }
@@ -2366,10 +2411,4 @@ async function signOutUser() {
 // INIT
 // ═══════════════════════════════════════════════
 initTTS();
-// Firebase module triggers showApp()/showAuthScreen() via onAuthStateChanged
-// Fallback if Firebase not configured yet:
-setTimeout(() => { if (!window._FB) showApp(); }, 2500);
-</script>
-</div><!-- end appRoot -->
-</body>
-</html>
+// Fire
