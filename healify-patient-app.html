@@ -28,23 +28,23 @@ window.addEventListener('load', function() {
       // Check if email has been verified
       if (!session.user.email_confirmed_at) {
         window._pendingVerifyEmail = session.user.email;
+        document.getElementById('loadingScreen').style.display = 'none';
         if (typeof showVerifyScreen === 'function') showVerifyScreen(session.user.email);
         return;
       }
       window._currentUser = session.user;
       document.getElementById('verifyScreen')?.classList.remove('show');
       document.getElementById('authScreen')?.classList.add('hidden');
-      // Show loading spinner while fetching user data
-      const ls = document.getElementById('loadingScreen');
-      if (ls) ls.style.display = 'flex';
+      // Loading screen is already showing — fetch data then go to app
       if (typeof loadAllUserData === 'function') await loadAllUserData(session.user.id);
-      if (ls) ls.style.display = 'none';
+      // Hide loading and show app
+      document.getElementById('loadingScreen').style.display = 'none';
       if (typeof showApp === 'function') showApp();
     } else {
       window._currentUser = null;
       window._userProfile = null;
-      const ls2 = document.getElementById('loadingScreen');
-      if (ls2) ls2.style.display = 'none';
+      // No session — hide loading, show login
+      document.getElementById('loadingScreen').style.display = 'none';
       if (typeof showAuthScreen === 'function') showAuthScreen();
     }
   });
@@ -619,16 +619,18 @@ async function resendVerification() {
 }
 
 function showApp() {
+  document.getElementById('loadingScreen').style.display = 'none';
   document.getElementById('authScreen')?.classList.add('hidden');
   document.getElementById('verifyScreen')?.classList.remove('show');
   document.getElementById('appRoot')?.classList.add('visible');
   // Signal to second script block that app should initialize
   window._appShouldInit = true;
-  // Try immediately — may work if second block already loaded
+  // Try immediately — works if second block already loaded
   if (typeof _initAppUI === 'function') _initAppUI();
 }
 
 function showAuthScreen() {
+  document.getElementById('loadingScreen').style.display = 'none';
   document.getElementById('authScreen')?.classList.remove('hidden');
   document.getElementById('verifyScreen')?.classList.remove('show');
   document.getElementById('appRoot')?.classList.remove('visible');
@@ -1375,7 +1377,7 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
 </div>
 
 <!-- ══ AUTH SCREEN ══ -->
-<div id="authScreen">
+<div id="authScreen" class="hidden">
   <div class="auth-phone">
     <div class="auth-hero">
       <div class="auth-logo">💚</div>
@@ -1458,7 +1460,7 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
 </div>
 
 <!-- ══ LOADING OVERLAY ══ -->
-<div id="loadingScreen" style="display:none;position:fixed;inset:0;z-index:9990;background:linear-gradient(150deg,var(--gd),var(--gm));align-items:center;justify-content:center;flex-direction:column;gap:16px;">
+<div id="loadingScreen" style="display:flex;position:fixed;inset:0;z-index:9990;background:linear-gradient(150deg,var(--gd),var(--gm));align-items:center;justify-content:center;flex-direction:column;gap:16px;">
   <div style="font-size:48px;">💚</div>
   <div style="font-size:22px;font-weight:900;color:#fff;letter-spacing:-0.3px;">Healify</div>
   <div style="width:40px;height:40px;border:3px solid rgba(255,255,255,0.2);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
