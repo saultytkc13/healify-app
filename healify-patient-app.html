@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Healify — AI Rehab</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💚</text></svg>">
 
 <!-- Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -89,7 +90,7 @@ async function loadAllUserData(uid) {
         .from('profiles')
         .select('*')
         .eq('email', p.physio_email)
-        .eq('role', 'physio')
+        .eq('role', 'admin')
         .limit(1);
       window._physioProfile = physioRows?.[0] || null;
     } else {
@@ -512,30 +513,26 @@ window.fbLogout = async function() {
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 body{
-  background:#CBD5C0;
+  background:var(--bg);
   min-height:100vh;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  padding:20px 16px 40px;
   font-family:'Nunito',sans-serif;
+  -webkit-font-smoothing:antialiased;
 }
 
 /* ── VERIFY EMAIL SCREEN ── */
 #verifyScreen{
   position:fixed;inset:0;z-index:9998;
-  background:#CBD5C0;
+  background:linear-gradient(150deg,var(--gd),var(--gm));
   display:none;align-items:center;justify-content:center;
   padding:20px;
 }
 #verifyScreen.show{display:flex;}
 .verify-phone{
-  width:100%;max-width:380px;
-  background:var(--bg);border-radius:44px;
-  overflow:hidden;
-  box-shadow:0 0 0 10px #1a1a1a,0 0 0 11px #333,0 30px 80px rgba(0,0,0,0.45);
+  width:100%;max-width:420px;
+  background:var(--w);border-radius:24px;
+  box-shadow:0 24px 64px rgba(0,0,0,0.25);
   display:flex;flex-direction:column;align-items:center;
-  padding:60px 36px 48px;text-align:center;gap:0;
+  padding:48px 36px;text-align:center;gap:0;
 }
 .verify-ico{font-size:56px;margin-bottom:16px;}
 .verify-title{font-size:22px;font-weight:900;color:var(--gd);margin-bottom:8px;}
@@ -550,21 +547,23 @@ body{
 /* ── AUTH SCREEN ── */
 #authScreen{
   position:fixed;inset:0;z-index:9999;
-  background:#CBD5C0;
-  display:flex;align-items:center;justify-content:center;
-  padding:20px;
+  background:linear-gradient(150deg,var(--gd),var(--gm));
+  display:flex;align-items:flex-start;justify-content:center;
+  padding:24px 16px;
+  overflow-y:auto;
 }
 #authScreen.hidden{display:none;}
 .auth-phone{
-  width:100%;max-width:380px;
-  background:var(--bg);border-radius:44px;
+  width:100%;max-width:440px;
+  background:var(--w);border-radius:20px;
   overflow:hidden;
-  box-shadow:0 0 0 10px #1a1a1a,0 0 0 11px #333,0 30px 80px rgba(0,0,0,0.45);
-  min-height:700px;display:flex;flex-direction:column;
+  box-shadow:0 20px 60px rgba(0,0,0,0.3);
+  display:flex;flex-direction:column;
+  margin:auto 0;
 }
 .auth-hero{
   background:linear-gradient(150deg,var(--gd),var(--gm));
-  padding:60px 32px 36px;flex-shrink:0;text-align:center;
+  padding:40px 32px 32px;flex-shrink:0;text-align:center;
 }
 .auth-logo{font-size:38px;margin-bottom:10px;}
 .auth-brand{font-size:28px;font-weight:900;color:#fff;letter-spacing:-0.5px;}
@@ -603,29 +602,274 @@ body{
 .auth-google:hover{border-color:var(--gm);background:var(--gp);}
 .auth-err{font-size:12px;color:var(--red);font-weight:700;text-align:center;min-height:18px;margin-bottom:4px;}
 
-/* App visibility */
-#appRoot{display:none;}
-#appRoot.visible{display:block;}
+/* ══════════════════════════════════════════════════════
+   HEALIFY — RESPONSIVE LAYOUT SYSTEM
+   Mobile  <1024px : stacked app, full width
+   Desktop ≥1024px : dashboard with sidebar + top bar
+══════════════════════════════════════════════════════ */
 
-.device-wrap{width:100%;max-width:390px;display:flex;flex-direction:column;align-items:center;gap:14px;}
-.device-label{font-size:11px;font-weight:800;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.12em;align-self:flex-start;}
-
-/* ── PHONE ── */
-.phone{
-  width:100%;background:var(--bg);border-radius:44px;overflow:hidden;
-  box-shadow:0 0 0 10px #1a1a1a,0 0 0 11px #333,0 30px 80px rgba(0,0,0,0.45);
-  position:relative;min-height:820px;display:flex;flex-direction:column;
+/* ── BASE (Mobile first) ── */
+html,body{margin:0;padding:0;width:100%;min-height:100vh;}
+#appRoot{
+  display:none;
+  flex-direction:column;
+  min-height:100vh;
+  width:100%;
+  background:var(--bg);
 }
-.notch{position:absolute;top:0;left:50%;transform:translateX(-50%);width:120px;height:34px;background:#1a1a1a;border-radius:0 0 20px 20px;z-index:100;}
-.sbar{height:50px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 8px;font-size:12px;font-weight:800;position:relative;z-index:10;flex-shrink:0;}
+#appRoot.visible{display:flex;}
+.device-wrap{display:flex;flex-direction:column;flex:1;width:100%;}
+.device-label{display:none;}
+.phone{display:flex;flex-direction:column;flex:1;width:100%;background:var(--bg);position:relative;}
+.notch{display:none !important;}
+.sbar{display:none !important;}
+
+/* ════════════════════════════════════════
+   DESKTOP LAYOUT (≥1024px)
+   - Fixed sidebar on the left
+   - Fixed top bar across the top
+   - Content area fills the rest
+   - Bottom nav hidden (sidebar replaces it)
+════════════════════════════════════════ */
+@media(min-width:1024px){
+
+  body{background:var(--bg);overflow:hidden;margin:0;padding:0;}
+
+  #appRoot{
+    flex-direction:row;
+    height:100vh;
+    width:100vw;
+    overflow:hidden;
+    background:var(--bg);
+    max-width:none;
+    border-radius:0;
+    box-shadow:none;
+  }
+
+  /* ── Sidebar ── */
+  .device-wrap{
+    width:240px;
+    flex-shrink:0;
+    flex:none;
+    display:flex;
+    flex-direction:column;
+    background:var(--w);
+    border-right:1px solid var(--bdr);
+    height:100vh;
+    position:fixed;
+    left:0;top:0;bottom:0;
+    z-index:100;
+  }
+
+  /* Sidebar brand header injected by JS */
+
+  /* ── Phone = content area ── */
+  .phone{
+    margin-left:240px;
+    flex:1;
+    height:100vh;
+    overflow:hidden;
+    background:var(--bg);
+    display:flex;
+    flex-direction:column;
+  }
+
+  /* ── Screens fill content area ── */
+  .screen{
+    height:100vh;
+    overflow:hidden;
+    display:none;
+    flex-direction:row;
+    flex-wrap:nowrap;
+  }
+  .screen.active{display:flex;}
+
+  /* ── Bottom nav becomes sidebar nav ── */
+  .bnav{
+    flex-direction:column !important;
+    width:240px;
+    position:fixed;
+    left:0;
+    top:72px;
+    bottom:0;
+    height:auto;
+    border-top:none !important;
+    border-right:1px solid var(--bdr);
+    padding:8px 0 !important;
+    box-shadow:none !important;
+    background:var(--w);
+    z-index:99;
+    overflow-y:auto;
+  }
+  .bni{
+    flex-direction:row !important;
+    align-items:center !important;
+    gap:12px !important;
+    padding:12px 20px !important;
+    border-radius:0 !important;
+    border-left:3px solid transparent;
+    width:100%;
+    justify-content:flex-start !important;
+  }
+  .bni.on{
+    background:var(--gp) !important;
+    border-left-color:var(--gm) !important;
+  }
+  .bni-ico{font-size:18px !important;}
+  .bni-lbl{
+    font-size:13px !important;
+    font-weight:700 !important;
+    text-transform:none !important;
+    letter-spacing:0 !important;
+  }
+
+  /* ── HOME page desktop layout ── */
+  #pg-home{flex-direction:column;overflow:hidden;}
+
+  /* Home hero becomes a top header bar */
+  .home-hero{
+    border-radius:0 !important;
+    padding:20px 32px !important;
+    flex-shrink:0;
+  }
+  .home-body{
+    flex:1;
+    overflow-y:auto;
+    padding:24px 32px 32px !important;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    grid-template-rows:auto;
+    gap:0 24px;
+    align-content:start;
+  }
+  /* Pain banner spans full width */
+  .home-body .pain-banner{grid-column:1/-1;}
+  /* Prescription card left column */
+  .home-body .rx-card{grid-column:1;grid-row:3;}
+  /* Stats right column */
+  .home-body .mini-stats{grid-column:2;grid-row:3;}
+  /* Sec labels span full */
+  .home-body .sec-lbl{grid-column:1/-1;}
+  /* Upcoming spans full */
+  .home-body .upcoming-card{grid-column:1/-1;}
+
+  /* ── PROGRESS page desktop layout ── */
+  #pg-progress{flex-direction:column;overflow:hidden;}
+  .prog-header{
+    flex-shrink:0;
+    padding:20px 32px !important;
+    background:var(--w);
+  }
+  .prog-body{
+    flex:1;
+    overflow-y:auto;
+    padding:24px 32px 32px !important;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:0 24px;
+    align-content:start;
+  }
+  .chart-card{grid-column:1/-1;}
+  .summary-row{grid-column:1/-1;}
+  .quality-timeline{grid-column:1;}
+  .achieve-grid{grid-column:2;grid-row:4;}
+  .week-sel{grid-column:1/-1;}
+
+  /* ── PHYSIO page desktop layout ── */
+  #pg-physio{flex-direction:column;overflow:hidden;}
+  .physio-hero{border-radius:0 !important;flex-shrink:0;}
+  .physio-body{
+    flex:1;
+    overflow-y:auto;
+    padding:24px 32px 32px !important;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:0 24px;
+    align-content:start;
+  }
+  .physio-stats{grid-column:1/-1;}
+  .appt-card{grid-column:1;}
+  .note-card{grid-column:2;grid-row:2;}
+  .msg-card{grid-column:1/-1;}
+
+  /* ── PROFILE page desktop layout ── */
+  #pg-profile{flex-direction:column;overflow:hidden;}
+  .profile-hero{flex-shrink:0;padding:20px 32px !important;}
+  .profile-body{
+    flex:1;
+    overflow-y:auto;
+    padding:24px 32px 32px !important;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:0 24px;
+    align-content:start;
+  }
+  .recovery-card{grid-column:1;}
+  .info-section:first-of-type{grid-column:2;grid-row:1;}
+  .info-section:last-of-type{grid-column:1;}
+  .settings-list{grid-column:2;}
+  .logout-btn{grid-column:1/-1;}
+
+  /* ── EXERCISE page desktop layout ── */
+  #pg-exercise{flex-direction:column;overflow:hidden;}
+  .pre-ex-header{flex-shrink:0;padding:20px 32px !important;}
+  .ex-setup{
+    flex:1;
+    overflow-y:auto;
+    padding:0 !important;
+  }
+  .ex-list{
+    padding:24px 32px !important;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:0 24px;
+  }
+  .start-session-wrap{padding:0 32px 24px !important;}
+
+  /* Scrollbars nice on desktop */
+  .home-body::-webkit-scrollbar,
+  .prog-body::-webkit-scrollbar,
+  .physio-body::-webkit-scrollbar,
+  .profile-body::-webkit-scrollbar,
+  .ex-setup::-webkit-scrollbar{
+    width:4px;
+  }
+  .home-body::-webkit-scrollbar-thumb,
+  .prog-body::-webkit-scrollbar-thumb,
+  .physio-body::-webkit-scrollbar-thumb,
+  .profile-body::-webkit-scrollbar-thumb,
+  .ex-setup::-webkit-scrollbar-thumb{
+    background:var(--bdr);
+    border-radius:2px;
+  }
+
+  /* Exercise live overlay — centred on desktop */
+  .live-overlay{
+    left:240px !important;
+  }
+  .complete-overlay{
+    left:240px !important;
+  }
+}
 
 /* ── SCREENS ── */
-.screen{display:none;flex-direction:column;flex:1;animation:si 0.25s ease;}
+.screen{display:none;flex-direction:column;flex:1;width:100%;animation:si 0.25s ease;}
 .screen.active{display:flex;}
 @keyframes si{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:translateX(0)}}
 
 /* ── BOTTOM NAV ── */
-.bnav{display:flex;background:var(--w);border-top:1px solid var(--bdr);padding:8px 0 28px;flex-shrink:0;position:relative;z-index:20;}
+.bnav{
+  display:flex;
+  background:var(--w);
+  border-top:1px solid var(--bdr);
+  padding:8px 0 env(safe-area-inset-bottom, 12px);
+  padding-bottom:max(env(safe-area-inset-bottom),12px);
+  flex-shrink:0;
+  position:sticky;
+  bottom:0;
+  z-index:20;
+  box-shadow:0 -2px 12px rgba(0,0,0,0.06);
+}
 .bni{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;padding:6px 4px;transition:all 0.2s;}
 .bni-ico{font-size:20px;transition:transform 0.2s;}
 .bni:hover .bni-ico{transform:scale(1.15);}
@@ -635,7 +879,7 @@ body{
 
 /* PAGE 1 — HOME */
 #pg-home{background:var(--bg);}
-.home-hero{background:linear-gradient(150deg,var(--gd) 0%,var(--gm) 100%);padding:12px 22px 28px;border-radius:0 0 32px 32px;position:relative;overflow:hidden;flex-shrink:0;}
+.home-hero{background:linear-gradient(150deg,var(--gd) 0%,var(--gm) 100%);padding:20px 22px 28px;border-radius:0 0 32px 32px;position:relative;overflow:hidden;flex-shrink:0;}
 .home-hero::after{content:'';position:absolute;top:-60px;right:-60px;width:200px;height:200px;border-radius:50%;background:rgba(116,198,157,0.08);}
 .home-hero::before{content:'';position:absolute;bottom:-30px;left:-30px;width:140px;height:140px;border-radius:50%;background:rgba(255,255,255,0.04);}
 .h-sbar{color:rgba(255,255,255,0.35);}
@@ -649,7 +893,7 @@ body{
 .streak-info strong{display:block;font-size:17px;font-weight:900;color:#fff;}
 .streak-info span{font-size:11px;color:rgba(255,255,255,0.45);}
 .streak-chip{margin-left:auto;background:#F6AD55;color:#7B341E;font-size:10px;font-weight:800;padding:4px 10px;border-radius:100px;}
-.home-body{flex:1;overflow-y:auto;padding:18px 18px 4px;}
+.home-body{flex:1;overflow-y:auto;padding:18px 18px 80px;}
 .home-body::-webkit-scrollbar{display:none;}
 .sec-lbl{font-size:11px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;}
 .pain-banner{background:var(--w);border:1px solid #FBD38D;border-left:4px solid var(--gold);border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:10px;margin-bottom:16px;cursor:pointer;transition:transform 0.2s;}
@@ -693,7 +937,7 @@ body{
 .prog-header{background:var(--w);padding:14px 22px 20px;border-bottom:1px solid var(--bdr);flex-shrink:0;}
 .prog-header-title{font-size:22px;font-weight:900;color:var(--txt);margin-bottom:2px;}
 .prog-header-sub{font-size:12px;color:var(--mut);}
-.prog-body{flex:1;overflow-y:auto;padding:16px 18px 4px;}
+.prog-body{flex:1;overflow-y:auto;padding:16px 18px 80px;}
 .prog-body::-webkit-scrollbar{display:none;}
 .week-sel{display:flex;gap:6px;margin-bottom:18px;overflow-x:auto;padding-bottom:4px;}
 .week-sel::-webkit-scrollbar{display:none;}
@@ -731,14 +975,14 @@ body{
 
 /* PAGE 3 — MY PHYSIO */
 #pg-physio{background:var(--bg);}
-.physio-hero{background:linear-gradient(150deg,var(--gd),var(--gm));padding:14px 22px 32px;flex-shrink:0;border-radius:0 0 32px 32px;}
+.physio-hero{background:linear-gradient(150deg,var(--gd),var(--gm));padding:20px 22px 32px;flex-shrink:0;border-radius:0 0 32px 32px;}
 .ph-sbar{color:rgba(255,255,255,0.35);}
 .physio-card-main{background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.18);border-radius:20px;padding:18px;display:flex;align-items:center;gap:14px;}
 .physio-avatar{width:64px;height:64px;border-radius:18px;background:linear-gradient(135deg,var(--glt),var(--gm));display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;border:2px solid rgba(255,255,255,0.3);}
 .physio-name{font-size:18px;font-weight:900;color:#fff;margin-bottom:2px;}
 .physio-qual{font-size:11px;color:rgba(255,255,255,0.55);margin-bottom:8px;}
 .physio-verified{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,0.15);border-radius:100px;padding:3px 10px;font-size:10px;font-weight:800;color:rgba(255,255,255,0.85);}
-.physio-body{flex:1;overflow-y:auto;padding:18px 18px 4px;}
+.physio-body{flex:1;overflow-y:auto;padding:18px 18px 80px;}
 .physio-body::-webkit-scrollbar{display:none;}
 .appt-card{background:var(--w);border-radius:18px;padding:18px;box-shadow:0 2px 12px rgba(45,106,79,0.08);margin-bottom:14px;}
 .appt-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
@@ -778,7 +1022,7 @@ body{
 
 /* PAGE 4 — PROFILE */
 #pg-profile{background:var(--bg);}
-.profile-hero{background:var(--w);padding:14px 22px 20px;border-bottom:1px solid var(--bdr);flex-shrink:0;}
+.profile-hero{background:var(--w);padding:20px 22px 20px;border-bottom:1px solid var(--bdr);flex-shrink:0;}
 .profile-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
 .profile-title{font-size:22px;font-weight:900;color:var(--txt);}
 .edit-btn{font-size:13px;font-weight:800;color:var(--gm);background:var(--gp);border:none;border-radius:100px;padding:5px 14px;cursor:pointer;font-family:'Nunito',sans-serif;}
@@ -787,7 +1031,7 @@ body{
 .profile-name{font-size:18px;font-weight:900;color:var(--txt);margin-bottom:2px;}
 .profile-joined{font-size:11px;color:var(--mut);}
 .profile-condition{font-size:11px;color:var(--gl);font-weight:700;margin-top:3px;}
-.profile-body{flex:1;overflow-y:auto;padding:16px 18px 4px;}
+.profile-body{flex:1;overflow-y:auto;padding:16px 18px 80px;}
 .profile-body::-webkit-scrollbar{display:none;}
 .recovery-card{background:var(--w);border-radius:18px;padding:18px;box-shadow:0 2px 12px rgba(45,106,79,0.07);margin-bottom:14px;display:flex;align-items:center;gap:16px;}
 .ring-wrap{position:relative;width:80px;height:80px;flex-shrink:0;}
@@ -817,7 +1061,7 @@ body{
 
 /* PAGE 5 — EXERCISE */
 #pg-exercise{background:var(--bg);}
-.ex-setup{flex:1;overflow-y:auto;padding:0 0 4px;}
+.ex-setup{flex:1;overflow-y:auto;padding:0 0 80px;}
 .ex-setup::-webkit-scrollbar{display:none;}
 .pre-ex-header{background:var(--w);padding:14px 22px 18px;border-bottom:1px solid var(--bdr);flex-shrink:0;}
 .pre-ex-back{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--mut);background:none;border:none;cursor:pointer;font-family:'Nunito',sans-serif;margin-bottom:12px;}
@@ -848,7 +1092,7 @@ body{
 .leg-sel-btn.active{background:var(--gp);border-color:var(--gm);color:var(--gm);}
 
 /* LIVE SESSION OVERLAY */
-.live-overlay{display:none;position:absolute;inset:0;background:var(--gd);z-index:50;flex-direction:column;border-radius:44px;overflow:hidden;}
+.live-overlay{display:none;position:fixed;inset:0;background:var(--gd);z-index:500;flex-direction:column;overflow:hidden;}
 .live-overlay.show{display:flex;}
 .live-cam{height:360px;background:#0D2418;position:relative;flex-shrink:0;overflow:hidden;}
 .live-cam-bg{position:absolute;inset:0;background:radial-gradient(ellipse at center,#1a3a24 0%,#0a1a10 100%);}
@@ -916,7 +1160,7 @@ body{
 .live-btn.end{background:rgba(220,38,38,0.15);color:#FC8181;border:1px solid rgba(220,38,38,0.3);}
 
 /* Session complete overlay */
-.complete-overlay{display:none;position:absolute;inset:0;background:var(--w);z-index:60;flex-direction:column;border-radius:44px;overflow:hidden;}
+.complete-overlay{display:none;position:fixed;inset:0;background:var(--w);z-index:510;flex-direction:column;overflow:hidden;}
 .complete-overlay.show{display:flex;}
 .comp-top{background:linear-gradient(135deg,#F0FFF4,#C6F6D5);padding:44px 28px 32px;display:flex;flex-direction:column;align-items:center;text-align:center;border-radius:0 0 36px 36px;flex-shrink:0;}
 .comp-check{width:72px;height:72px;background:var(--gm);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:30px;margin-bottom:14px;box-shadow:0 8px 24px rgba(45,106,79,0.3);color:#fff;font-weight:900;}
@@ -967,7 +1211,7 @@ body{
     <div class="verify-ico">📬</div>
     <div class="verify-title">Check your email</div>
     <div class="verify-sub">We sent a verification link to:</div>
-    <div class="verify-email-show" id="verifyEmailAddr"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="98e1f7edead8fdf5f9f1f4b6fbf7f5">[email&#160;protected]</a></div>
+    <div class="verify-email-show" id="verifyEmailAddr">your@email.com</div>
     <div class="verify-steps">
       <div class="verify-step"><div class="verify-step-num">1</div><div>Open your email inbox — check spam if you don't see it within 1 minute</div></div>
       <div class="verify-step"><div class="verify-step-num">2</div><div>Click the <strong>Confirm your email</strong> link in the Healify email</div></div>
@@ -1068,16 +1312,13 @@ body{
 
 <!-- ══ MAIN APP ══ -->
 <div id="appRoot">
-
-<div class="device-label">Healify · Live AI Rehab</div>
-
+<div class="device-wrap">
 <div class="phone" id="phone">
-  <div class="notch"></div>
 
   <!-- ══ PAGE 1: HOME ══ -->
   <div class="screen" id="pg-home">
     <div class="home-hero">
-      <div class="sbar h-sbar"><span>9:41</span><div style="display:flex;gap:4px;font-size:11px">📶 🔋</div></div>
+      
       <div class="h-top">
         <div>
           <div class="h-greet">Good morning,</div>
@@ -1129,7 +1370,7 @@ body{
   <!-- ══ PAGE 2: PROGRESS ══ -->
   <div class="screen" id="pg-progress">
     <div class="prog-header">
-      <div class="sbar" style="color:var(--mut);padding:0;height:auto;margin-bottom:12px"><span>9:41</span><div>📶 🔋</div></div>
+      
       <div class="prog-header-title">Your Progress</div>
       <div class="prog-header-sub">Knee Replacement Recovery · Started Mar 1</div>
     </div>
@@ -1181,7 +1422,7 @@ body{
   <!-- ══ PAGE 3: MY PHYSIO ══ -->
   <div class="screen" id="pg-physio">
     <div class="physio-hero">
-      <div class="sbar ph-sbar" style="padding:0;height:auto;margin-bottom:16px"><span>9:41</span><div>📶 🔋</div></div>
+      
       <div class="physio-card-main">
         <div class="physio-avatar">👩‍⚕️</div>
         <div>
@@ -1237,7 +1478,7 @@ body{
   <!-- ══ PAGE 4: PROFILE ══ -->
   <div class="screen" id="pg-profile">
     <div class="profile-hero">
-      <div class="sbar" style="color:var(--mut);padding:0;height:auto;margin-bottom:14px"><span>9:41</span><div>📶 🔋</div></div>
+      
       <div class="profile-top"><div class="profile-title">My Profile</div><button class="edit-btn">Edit</button></div>
       <div class="profile-card">
         <div class="profile-ava">👤</div>
@@ -1297,7 +1538,7 @@ body{
   <!-- ══ PAGE 5: EXERCISE ══ -->
   <div class="screen" id="pg-exercise">
     <div class="pre-ex-header">
-      <div class="sbar" style="color:var(--mut);padding:0;height:auto;margin-bottom:10px"><span>9:41</span><div>📶 🔋</div></div>
+      
       <button class="pre-ex-back" onclick="nav('home')">← Back to Home</button>
       <div class="pre-ex-title">Morning Session</div>
       <div class="pre-ex-sub" id="exPageSub">Loading…</div>
@@ -1464,7 +1705,7 @@ body{
 </div><!-- end phone -->
 </div><!-- end device-wrap -->
 
-<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+<script>
 // ═══════════════════════════════════════════════
 // EMAILJS CONFIG (from index.html)
 // ═══════════════════════════════════════════════
@@ -1540,19 +1781,33 @@ let isPaused = false;
 // ═══════════════════════════════════════════════
 const pages = { home:'pg-home', progress:'pg-progress', physio:'pg-physio', profile:'pg-profile', exercise:'pg-exercise' };
 function nav(page) {
+  // Hide all screens
   Object.values(pages).forEach(id => document.getElementById(id).classList.remove('active'));
   document.getElementById(pages[page]).classList.add('active');
-  // Update bottom nav active states
-  document.querySelectorAll('.bnav').forEach(bnav => {
-    bnav.querySelectorAll('.bni').forEach(b => b.classList.remove('on'));
+  // Update ALL nav items across all bnavs (mobile bottom + desktop sidebar)
+  document.querySelectorAll('.bni').forEach(b => b.classList.remove('on'));
+  const map = ['home','progress','physio','profile'];
+  document.querySelectorAll('.bni').forEach(b => {
+    // Match by icon or position
+    const lbl = b.querySelector('.bni-lbl')?.textContent?.toLowerCase();
+    if (lbl && page.toLowerCase().includes(lbl.split(' ')[0])) b.classList.add('on');
+    // Also match exercise -> home nav item stays lit
   });
+  // More precise: find matching nav items by data or index
   document.querySelectorAll('.bnav').forEach(bnav => {
     const items = bnav.querySelectorAll('.bni');
-    const map = ['home','progress','physio','profile'];
-    map.forEach((pg,i) => { if(pg===page && items[i]) items[i].classList.add('on'); });
+    items.forEach(b => b.classList.remove('on'));
+    map.forEach((pg, i) => {
+      if (pg === page && items[i]) items[i].classList.add('on');
+    });
   });
   if (page === 'progress') renderProgressPage();
   if (page === 'home') refreshHomeStats();
+  // On desktop, scroll content area to top
+  ['home-body','prog-body','physio-body','profile-body','ex-setup'].forEach(cls => {
+    const el = document.querySelector('.' + cls);
+    if (el) el.scrollTop = 0;
+  });
 }
 function goEx() { nav('exercise'); }
 
@@ -2244,10 +2499,6 @@ function setPain(btn, val) {
   btn.style.color = '#fff';
 }
 
-document.querySelectorAll('.toggle:not(#voiceToggleUI)').forEach(t => {
-  t.addEventListener('click', () => t.classList.toggle('off'));
-});
-
 function toggleVoiceFromUI() {
   TTS.enabled = !TTS.enabled;
   document.getElementById('voiceToggleUI').classList.toggle('off', !TTS.enabled);
@@ -2273,10 +2524,25 @@ function showApp() {
   document.getElementById('authScreen').classList.add('hidden');
   document.getElementById('verifyScreen').classList.remove('show');
   document.getElementById('appRoot').classList.add('visible');
+  // Inject desktop sidebar header if on desktop
+  injectDesktopSidebar();
   // Always land on home screen after login
   nav('home');
   refreshHomeStats();
   initTTS();
+}
+
+function injectDesktopSidebar() {
+  if (window.innerWidth < 1024) return;
+  if (document.getElementById('desktopSidebarHdr')) return; // already injected
+  const wrap = document.querySelector('.device-wrap');
+  if (!wrap) return;
+  const hdr = document.createElement('div');
+  hdr.id = 'desktopSidebarHdr';
+  hdr.style.cssText = 'padding:24px 20px 20px;border-bottom:1px solid var(--bdr);flex-shrink:0;';
+  hdr.innerHTML = `<div style="font-size:20px;font-weight:900;color:var(--gd);letter-spacing:-0.3px;">💚 Healify</div>
+    <div style="font-size:11px;color:var(--mut);margin-top:2px;">AI Rehab Platform</div>`;
+  wrap.insertBefore(hdr, wrap.firstChild);
 }
 function showAuthScreen() {
   document.getElementById('authScreen').classList.remove('hidden');
@@ -2403,24 +2669,27 @@ async function doRegister() {
 async function signOutUser() {
   if (confirm('Sign out of Healify?')) {
     localStorage.removeItem('helify_sessions');
-    if (window.fbLogout) await window.fbLogout();
-    else showAuthScreen();
+    localStorage.removeItem('healify_sessions');
+    try {
+      await _sb.auth.signOut();
+    } catch(e) { console.warn('Signout:', e); }
+    showAuthScreen();
   }
 }
 
 // ═══════════════════════════════════════════════
-// INIT
+// INIT — runs after all HTML/JS is parsed
 // ═══════════════════════════════════════════════
-initTTS();
+document.addEventListener('DOMContentLoaded', function() {
+  // Init TTS voices
+  try { initTTS(); } catch(e) {}
 
-// Safety net: if Supabase auth hasn't resolved in 4s, show auth screen
-// (handles case where credentials aren't set yet)
-setTimeout(() => {
-  const appVisible  = document.getElementById('appRoot')?.classList.contains('visible');
-  const authHidden  = document.getElementById('authScreen')?.classList.contains('hidden');
-  const verifyShown = document.getElementById('verifyScreen')?.classList.contains('show');
-  if (!appVisible && !authHidden && !verifyShown) {
-    showAuthScreen();
-  }
-}, 4000);
+  // Show auth screen immediately — Supabase will call showApp() if session exists
+  showAuthScreen();
+
+  // Toggle switches
+  document.querySelectorAll('.toggle:not(#voiceToggleUI)').forEach(t => {
+    t.addEventListener('click', () => t.classList.toggle('off'));
+  });
+});
 // Fire
