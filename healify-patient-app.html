@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Healify — AI Rehab</title>
+<title>Healify — Stand. Walk. Recover.</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💚</text></svg>">
 
 <!-- Supabase -->
@@ -262,6 +262,11 @@ window.populateAllUI = function() {
   safeSet('sumSessions', sessions.length);
   safeSet('sumReps',     totalReps);
   safeSet('sumQuality',  avgQ > 0 ? avgQ + '%' : '—%');
+  // Streak visibility
+  try { updateStreakVisibility(); } catch(e) {}
+  // Rx upload visibility
+  const rxU = document.getElementById('rxUploadWrap');
+  if (rxU) rxU.style.display = rx ? 'none' : '';
 };
 
 // ── Helpers ──
@@ -411,30 +416,9 @@ window.saveSessionToFirestore = async function(data) {
 };
 
 // Send message to physio
-window.sendMessage = async function() {
-  const inp  = document.getElementById('msgInputField');
-  const text = inp?.value?.trim();
-  if (!text || !window._currentUser) return;
-  const { error } = await _sb.from('messages').insert({
-    patient_id:  _currentUser.id,
-    sender:      'patient',
-    sender_name: window._userProfile?.name || 'Patient',
-    text
-  });
-  if (!error) {
-    inp.value = '';
-    // Reload messages
-    const { data } = await _sb.from('messages').select('*').eq('patient_id',_currentUser.id).order('sent_at',{ascending:true}).limit(10);
-    window._messages = data || [];
-    renderMessages(window._messages);
-  }
-};
+;
 
-// Log pain score
-window.logPain = async function(val) {
-  if (!window._currentUser) return;
-  await _sb.from('pain_logs').insert({ user_id: _currentUser.id, pain: val });
-};
+// logPain — defined below in main JS block
 
 // ══════════════════════════════════════════════════════
 // AUTH ACTIONS
@@ -607,22 +591,27 @@ function showApp() {
   // Hide auth screens
   document.getElementById('authScreen')?.classList.add('hidden');
   document.getElementById('verifyScreen')?.classList.remove('show');
-  document.getElementById('loadingScreen') && (document.getElementById('loadingScreen').style.display = 'none');
+  const ls = document.getElementById('loadingScreen');
+  if (ls) ls.style.display = 'none';
   // Show app
   var appRoot = document.getElementById('appRoot');
   if (appRoot) { appRoot.style.display = 'flex'; appRoot.style.flexDirection = 'column'; appRoot.style.minHeight = '100vh'; appRoot.classList.add('visible'); }
-  // Directly activate home screen — no dependency on nav()
+  // Activate home screen
   document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('active'); });
   var home = document.getElementById('pg-home');
   if (home) home.classList.add('active');
-  // Activate first bottom nav item
-  document.querySelectorAll('.bnav').forEach(function(bnav){
-    bnav.querySelectorAll('.bni').forEach(function(b,i){ b.classList.toggle('on', i===0); });
+  // Set nav — home is first
+  document.querySelectorAll('.bnav .bni').forEach(function(b){
+    b.classList.remove('on');
+    const lbl = (b.querySelector('.bni-lbl') || {}).textContent || '';
+    if (lbl.trim().toLowerCase() === 'home') b.classList.add('on');
   });
-  // Call helpers that live in second block
+  // Helpers
   try { if (typeof injectDesktopSidebar==='function') injectDesktopSidebar(); } catch(e){}
   try { if (typeof refreshHomeStats==='function') refreshHomeStats(); } catch(e){}
   try { if (typeof initTTS==='function') initTTS(); } catch(e){}
+  try { if (typeof loadSavedProfilePic==='function') loadSavedProfilePic(); } catch(e){}
+  try { if (typeof updateStreakVisibility==='function') updateStreakVisibility(); } catch(e){}
 }
 
 function showAuthScreen() {
@@ -1351,6 +1340,26 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
 .float-warning.show{opacity:1;transform:translateX(-50%) translateY(0);}
 .float-warning-txt{font-size:12px;font-weight:800;color:#F6AD55;letter-spacing:0.04em;}
 .float-warning-sub{font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px;}
+
+/* ── 5-item bottom nav ── */
+.bnav{display:grid !important;grid-template-columns:repeat(5,1fr) !important;background:var(--w);border-top:1px solid var(--bdr);flex-shrink:0;}
+.bni{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:9px 2px 7px;cursor:pointer;gap:2px;transition:opacity 0.15s;}
+.bni-ico{font-size:19px;line-height:1;}
+.bni-lbl{font-size:9px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:0.02em;white-space:nowrap;}
+.bni.on .bni-lbl{color:var(--gm);}
+.bni:active{opacity:0.7;}
+
+/* ── Log pain buttons ── */
+.lpb{width:36px;height:36px;border-radius:9px;border:1.5px solid var(--bdr);background:var(--w);font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;color:var(--txt);transition:all 0.15s;}
+.lpb:hover,.lpb:active{border-color:var(--gm);background:var(--gp);}
+.lpb.active-pain{color:#fff;}
+
+/* ── Auth logo container ── */
+.auth-logo{display:flex;align-items:center;justify-content:center;margin-bottom:8px;}
+
+/* ── Profile avatar ── */
+.profile-ava{width:54px;height:54px;border-radius:18px;background:linear-gradient(135deg,var(--glt),var(--gm));display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;overflow:hidden;position:relative;}
+
 </style>
 </head>
 <body>
@@ -1373,13 +1382,67 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
   </div>
 </div>
 
+
+<!-- ══ FORGOT PASSWORD MODAL ══ -->
+<div id="forgotModal" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.55);align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#fff;border-radius:20px;padding:32px 24px;max-width:380px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+    <div style="font-size:36px;text-align:center;margin-bottom:12px;">🔐</div>
+    <div style="font-size:20px;font-weight:900;color:var(--gd);text-align:center;margin-bottom:6px;">Reset Password</div>
+    <div style="font-size:12px;color:var(--mut);text-align:center;margin-bottom:20px;line-height:1.6;">Enter your registered email — we'll set a temporary password.</div>
+    <div class="auth-label">Email Address</div>
+    <input class="auth-input" id="forgotEmail" type="email" placeholder="you@email.com" style="margin-bottom:12px;">
+    <div id="forgotStatus" style="font-size:12px;font-weight:700;text-align:center;min-height:18px;margin-bottom:10px;"></div>
+    <button onclick="doForgotPassword()" id="forgotBtn" style="width:100%;padding:14px;background:var(--gm);color:#fff;border:none;border-radius:12px;font-size:14px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;margin-bottom:8px;">Send Reset Link</button>
+    <button onclick="document.getElementById('forgotModal').style.display='none'" style="width:100%;padding:12px;background:var(--bg);color:var(--mut);border:1.5px solid var(--bdr);border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Nunito',sans-serif;">Cancel</button>
+  </div>
+</div>
+
+<!-- ══ BOOKING MODAL ══ -->
+<div id="bookingModal" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.55);align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#fff;border-radius:20px;padding:28px 22px;max-width:400px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.3);max-height:90vh;overflow-y:auto;">
+    <div style="font-size:22px;font-weight:900;color:var(--gd);margin-bottom:4px;">📅 Book Appointment</div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:18px;">Schedule with your physiotherapist</div>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px;">
+      <div><div class="auth-label">Session Type</div>
+        <select id="apptType" class="auth-input"><option value="in-person">In-Person Visit</option><option value="video">Video Consultation</option><option value="follow-up">Follow-up Session</option></select></div>
+      <div><div class="auth-label">Preferred Date</div><input type="date" id="apptDateInput" class="auth-input"></div>
+      <div><div class="auth-label">Preferred Time</div>
+        <select id="apptTimeInput" class="auth-input"><option>9:00 AM</option><option>10:00 AM</option><option>11:00 AM</option><option>12:00 PM</option><option>2:00 PM</option><option>3:00 PM</option><option>4:00 PM</option><option>5:00 PM</option></select></div>
+      <div><div class="auth-label">Notes (optional)</div><textarea id="apptNotes" class="auth-input" rows="2" placeholder="Any specific concerns…" style="resize:none;"></textarea></div>
+    </div>
+    <div id="bookingStatus" style="font-size:12px;font-weight:700;text-align:center;min-height:18px;margin-bottom:10px;"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <button onclick="document.getElementById('bookingModal').style.display='none'" style="padding:13px;background:var(--bg);color:var(--mut);border:1.5px solid var(--bdr);border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Nunito',sans-serif;">Cancel</button>
+      <button onclick="confirmBooking()" style="padding:13px;background:var(--gm);color:#fff;border:none;border-radius:12px;font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;">Confirm →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ PROFILE EDIT MODAL ══ -->
+<div id="profileEditModal" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.55);align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#fff;border-radius:20px;padding:28px 22px;max-width:400px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.3);max-height:90vh;overflow-y:auto;">
+    <div style="font-size:22px;font-weight:900;color:var(--gd);margin-bottom:18px;">✏️ Edit Profile</div>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px;">
+      <div><div class="auth-label">Full Name</div><input id="editName" class="auth-input" type="text" placeholder="Your name"></div>
+      <div><div class="auth-label">Age</div><input id="editAge" class="auth-input" type="number" placeholder="Age"></div>
+      <div><div class="auth-label">City</div><input id="editCity" class="auth-input" type="text" placeholder="City"></div>
+      <div><div class="auth-label">Phone</div><input id="editPhone" class="auth-input" type="tel" placeholder="+91 98765 43210"></div>
+    </div>
+    <div id="editProfileStatus" style="font-size:12px;font-weight:700;text-align:center;min-height:18px;margin-bottom:10px;"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <button onclick="document.getElementById('profileEditModal').style.display='none'" style="padding:13px;background:var(--bg);color:var(--mut);border:1.5px solid var(--bdr);border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Nunito',sans-serif;">Cancel</button>
+      <button onclick="saveProfileEdit()" style="padding:13px;background:var(--gm);color:#fff;border:none;border-radius:12px;font-size:13px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;">Save Changes</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══ AUTH SCREEN ══ -->
 <div id="authScreen" class="hidden">
   <div class="auth-phone">
     <div class="auth-hero">
       <div class="auth-logo">💚</div>
       <div class="auth-brand">Healify</div>
-      <div class="auth-tagline">AI-Powered Knee Rehab</div>
+      <div class="auth-tagline">Stand. Walk. Recover.</div>
     </div>
     <div class="auth-body">
       <div class="auth-tabs">
@@ -1401,6 +1464,7 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
         </div>
         <div class="auth-err" id="loginErr"></div>
         <button class="auth-btn" id="loginBtn" onclick="doLogin()">Sign In →</button>
+        <div style="text-align:center;margin-top:4px;"><button onclick="showForgotPassword()" style="font-size:12px;font-weight:700;color:var(--gm);background:none;border:none;cursor:pointer;font-family:'Nunito',sans-serif;text-decoration:underline;">Forgot Password?</button></div>
 
       </div>
 
@@ -1472,7 +1536,7 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
         </div>
         <div class="h-notif">🔔<div class="h-notif-dot"></div></div>
       </div>
-      <div class="streak-row">
+      <div class="streak-row" id="streakRow" style="display:none;">
         <div class="streak-ico">🔥</div>
         <div class="streak-info">
           <strong id="homeStreakNum">— Streak</strong>
@@ -1482,9 +1546,9 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
       </div>
     </div>
     <div class="home-body">
-      <div class="pain-banner" style="margin-top:2px">
-        <span style="font-size:20px">😐</span>
-        <div><strong>Pain check before session</strong><span>Tap to rate your pain level today</span></div>
+      <div class="pain-banner" id="painBannerHome" style="margin-top:2px;cursor:pointer;" onclick="nav('exercise')">
+        <span style="font-size:20px" id="painBannerEmoji">😐</span>
+        <div><strong>Pain check before session</strong><span id="painBannerSub">Tap to rate your pain level</span></div>
         <span style="margin-left:auto;color:var(--gold);font-size:20px">›</span>
       </div>
       <div class="sec-lbl">Today's Prescription</div>
@@ -1493,8 +1557,15 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
           <div><div class="rx-title" id="rxTitle">Today's Session</div><div class="rx-sub" id="rxPhysioSub">Loading…</div></div>
           <span class="rx-chip" id="rxPendingChip">…</span>
         </div>
-        <div class="rx-list" id="rxExList"><div class="rx-row" style="justify-content:center;color:var(--mut);font-size:12px">Loading prescription…</div></div>
-        <button class="btn-go" onclick="event.stopPropagation();goEx()">Start Session →</button>
+        <div class="rx-list" id="rxExList"><div class="rx-row" style="justify-content:center;color:var(--mut);font-size:12px;">No prescription yet — your physio will add one</div></div>
+        <div id="rxUploadWrap" style="padding:8px 0 4px;">
+          <label for="rxFileInput" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;background:var(--gp);border:1.5px dashed var(--gm);border-radius:12px;cursor:pointer;font-size:12px;font-weight:700;color:var(--gm);">
+            📎 Upload Prescription (PDF / Image)
+          </label>
+          <input type="file" id="rxFileInput" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" onchange="handleRxUpload(this)">
+          <div id="rxUploadStatus" style="font-size:11px;color:var(--mut);text-align:center;margin-top:5px;min-height:16px;"></div>
+        </div>
+        <button class="btn-go" id="startSessionBtn" onclick="event.stopPropagation();goEx()">Start Session →</button>
       </div>
       <div class="sec-lbl">This Week</div>
       <div class="mini-stats">
@@ -1505,11 +1576,12 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
       <div class="upcoming-card" id="upcomingList"><div style="padding:12px;text-align:center;font-size:12px;color:var(--mut)">Loading appointments…</div></div>
       <div style="height:8px"></div>
     </div>
-    <div class="bnav">
-      <div class="bni on" onclick="nav('home')"><div class="bni-ico">🏠</div><div class="bni-lbl" style="color:var(--gm)">Home</div></div>
-      <div class="bni" onclick="nav('progress')"><div class="bni-ico">📊</div><div class="bni-lbl">Progress</div></div>
-      <div class="bni" onclick="nav('physio')"><div class="bni-ico">👨‍⚕️</div><div class="bni-lbl">My Physio</div></div>
-      <div class="bni" onclick="nav('profile')"><div class="bni-ico">👤</div><div class="bni-lbl">Profile</div></div>
+    <div class="bnav" data-pg="home">
+      <div class="bni on" onclick="nav('home')">    <div class="bni-ico">🏠</div><div class="bni-lbl">Home</div></div>
+      <div class="bni" onclick="nav('progress')">   <div class="bni-ico">📊</div><div class="bni-lbl">Progress</div></div>
+      <div class="bni" onclick="nav('logs')">       <div class="bni-ico">📋</div><div class="bni-lbl">My Logs</div></div>
+      <div class="bni" onclick="nav('physio')">     <div class="bni-ico">👨‍⚕️</div><div class="bni-lbl">Physio</div></div>
+      <div class="bni" onclick="nav('profile')">    <div class="bni-ico">👤</div><div class="bni-lbl">Profile</div></div>
     </div>
   </div>
 
@@ -1522,10 +1594,10 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
     </div>
     <div class="prog-body">
       <div class="week-sel">
-        <button class="wk-btn on">This Week</button>
-        <button class="wk-btn">Last 2 Weeks</button>
-        <button class="wk-btn">This Month</button>
-        <button class="wk-btn">All Time</button>
+        <button class="wk-btn on"  onclick="setProgressFilter('week',this)">This Week</button>
+        <button class="wk-btn"     onclick="setProgressFilter('two_weeks',this)">Last 2 Weeks</button>
+        <button class="wk-btn"     onclick="setProgressFilter('month',this)">This Month</button>
+        <button class="wk-btn"     onclick="setProgressFilter('all',this)">All Time</button>
       </div>
       <div class="chart-card">
         <div class="chart-title">Range of Motion (ROM)</div>
@@ -1557,11 +1629,12 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
       </div>
       <div style="height:8px"></div>
     </div>
-    <div class="bnav">
-      <div class="bni" onclick="nav('home')"><div class="bni-ico">🏠</div><div class="bni-lbl">Home</div></div>
-      <div class="bni on" onclick="nav('progress')"><div class="bni-ico">📊</div><div class="bni-lbl" style="color:var(--gm)">Progress</div></div>
-      <div class="bni" onclick="nav('physio')"><div class="bni-ico">👨‍⚕️</div><div class="bni-lbl">My Physio</div></div>
-      <div class="bni" onclick="nav('profile')"><div class="bni-ico">👤</div><div class="bni-lbl">Profile</div></div>
+    <div class="bnav" data-pg="progress">
+      <div class="bni" onclick="nav('home')">      <div class="bni-ico">🏠</div><div class="bni-lbl">Home</div></div>
+      <div class="bni on" onclick="nav('progress')"><div class="bni-ico">📊</div><div class="bni-lbl">Progress</div></div>
+      <div class="bni" onclick="nav('logs')">      <div class="bni-ico">📋</div><div class="bni-lbl">My Logs</div></div>
+      <div class="bni" onclick="nav('physio')">    <div class="bni-ico">👨‍⚕️</div><div class="bni-lbl">Physio</div></div>
+      <div class="bni" onclick="nav('profile')">   <div class="bni-ico">👤</div><div class="bni-lbl">Profile</div></div>
     </div>
   </div>
 
@@ -1595,29 +1668,40 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
           </div>
         </div>
         <div class="appt-actions">
-          <button class="appt-btn outline">Reschedule</button>
-          <button class="appt-btn filled">Get Directions</button>
+          <button class="appt-btn outline" onclick="openBookingModal()">Book Appointment</button>
+          <button class="appt-btn filled"  onclick="getDirections()">Get Directions</button>
         </div>
+        <button onclick="findNearbyPhysio()" style="width:100%;margin-top:8px;padding:10px;background:var(--bg);border:1.5px solid var(--bdr);border-radius:11px;font-size:12px;font-weight:800;color:var(--sub);cursor:pointer;font-family:'Nunito',sans-serif;">📍 Find Nearby Physio Clinics</button>
       </div>
       <div class="note-card">
         <div class="note-header"><span style="font-size:16px">📋</span><div class="note-title">Latest Note from Dr. Priya</div><div class="note-date" id="physioNoteDate">—</div></div>
         <div class="note-body">Great progress this week Rahul! Your ROM is improving faster than expected. I noticed some hip drift in Tuesday's session — focus on keeping your hip square during the leg raise. Otherwise excellent work. Keep up the 5-day streak! 💪</div>
       </div>
+      <!-- Nearby clinics (shown on demand) -->
+      <div id="nearbyClinicsCard" style="display:none;background:var(--w);border-radius:18px;padding:18px;box-shadow:0 2px 12px rgba(45,106,79,0.07);margin-bottom:14px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <div style="font-size:13px;font-weight:900;color:var(--txt);">Nearby Physio Clinics</div>
+          <button onclick="document.getElementById('nearbyClinicsCard').style.display='none'" style="font-size:11px;color:var(--mut);background:none;border:none;cursor:pointer;">✕ Close</button>
+        </div>
+        <div id="clinicsList"></div>
+      </div>
+
       <div class="msg-card">
         <div class="sec-lbl" style="margin-bottom:14px">Messages</div>
         <div class="msg-thread" id="msgThread"><div style="color:var(--mut);font-size:12px;text-align:center;padding:10px 0">Loading messages…</div></div>
         <div class="msg-input-row">
-          <input class="msg-input" id="msgInputField" type="text" placeholder="Message your physio…" onkeydown="if(event.key==='Enter')sendMessage()">
-          <button class="msg-send" onclick="sendMessage()">↑</button>
+          <input class="msg-input" id="msgInputField" type="text" placeholder="Message your physio…" onkeydown="if(event.key==='Enter')sendMsg()">
+          <button class="msg-send" id="msgSendBtn" onclick="sendMsg()">↑</button>
         </div>
       </div>
       <div style="height:8px"></div>
     </div>
-    <div class="bnav">
-      <div class="bni" onclick="nav('home')"><div class="bni-ico">🏠</div><div class="bni-lbl">Home</div></div>
-      <div class="bni" onclick="nav('progress')"><div class="bni-ico">📊</div><div class="bni-lbl">Progress</div></div>
-      <div class="bni on" onclick="nav('physio')"><div class="bni-ico">👨‍⚕️</div><div class="bni-lbl" style="color:var(--gm)">My Physio</div></div>
-      <div class="bni" onclick="nav('profile')"><div class="bni-ico">👤</div><div class="bni-lbl">Profile</div></div>
+    <div class="bnav" data-pg="physio">
+      <div class="bni" onclick="nav('home')">      <div class="bni-ico">🏠</div><div class="bni-lbl">Home</div></div>
+      <div class="bni" onclick="nav('progress')">  <div class="bni-ico">📊</div><div class="bni-lbl">Progress</div></div>
+      <div class="bni" onclick="nav('logs')">      <div class="bni-ico">📋</div><div class="bni-lbl">My Logs</div></div>
+      <div class="bni on" onclick="nav('physio')"> <div class="bni-ico">👨‍⚕️</div><div class="bni-lbl">Physio</div></div>
+      <div class="bni" onclick="nav('profile')">   <div class="bni-ico">👤</div><div class="bni-lbl">Profile</div></div>
     </div>
   </div>
 
@@ -1625,9 +1709,14 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
   <div class="screen" id="pg-profile">
     <div class="profile-hero">
       
-      <div class="profile-top"><div class="profile-title">My Profile</div><button class="edit-btn">Edit</button></div>
+      <div class="profile-top"><div class="profile-title">My Profile</div><button class="edit-btn" onclick="toggleProfileEdit()">Edit</button></div>
       <div class="profile-card">
-        <div class="profile-ava">👤</div>
+        <div class="profile-ava" id="profileAvaWrap" onclick="document.getElementById('profilePicInput').click()" title="Tap to change photo" style="cursor:pointer;position:relative;overflow:visible;">
+          <img id="profilePicImg" src="" alt="" style="display:none;width:100%;height:100%;object-fit:cover;border-radius:18px;">
+          <span id="profilePicEmoji" style="font-size:24px;">👤</span>
+          <div style="position:absolute;bottom:-4px;right:-4px;width:20px;height:20px;background:var(--gm);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;border:2px solid #fff;z-index:2;">✏️</div>
+        </div>
+        <input type="file" id="profilePicInput" accept="image/*" style="display:none;" onchange="handleProfilePic(this)">
         <div><div class="profile-name" id="profileNameVal">Rahul Sharma</div><div class="profile-joined" id="profileJoinedDate">Member</div><div class="profile-condition" id="profileConditionBadge">🦵 Knee Replacement Recovery</div></div>
       </div>
     </div>
@@ -1670,14 +1759,15 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
         <div class="setting-row"><div class="setting-ico" style="background:var(--gp)">🌐</div><div class="setting-name">Language</div><span class="info-val" style="font-size:12px;margin-right:8px">English</span><div class="setting-arrow">›</div></div>
       </div>
       <button class="logout-btn" id="profileLogoutBtn" onclick="signOutUser()">Sign Out</button>
-      <div style="text-align:center;font-size:11px;color:var(--mut);margin-bottom:8px">Healify v2.0 · AI-Powered Rehab · Stand. Walk. Recover.</div>
+      <div style="text-align:center;font-size:11px;color:var(--mut);margin-bottom:8px">Healify v2.0 · Healify Rehab · Stand. Walk. Recover.</div>
       <div style="height:4px"></div>
     </div>
-    <div class="bnav">
-      <div class="bni" onclick="nav('home')"><div class="bni-ico">🏠</div><div class="bni-lbl">Home</div></div>
-      <div class="bni" onclick="nav('progress')"><div class="bni-ico">📊</div><div class="bni-lbl">Progress</div></div>
-      <div class="bni" onclick="nav('physio')"><div class="bni-ico">👨‍⚕️</div><div class="bni-lbl">My Physio</div></div>
-      <div class="bni on" onclick="nav('profile')"><div class="bni-ico">👤</div><div class="bni-lbl" style="color:var(--gm)">Profile</div></div>
+    <div class="bnav" data-pg="profile">
+      <div class="bni" onclick="nav('home')">      <div class="bni-ico">🏠</div><div class="bni-lbl">Home</div></div>
+      <div class="bni" onclick="nav('progress')">  <div class="bni-ico">📊</div><div class="bni-lbl">Progress</div></div>
+      <div class="bni" onclick="nav('logs')">      <div class="bni-ico">📋</div><div class="bni-lbl">My Logs</div></div>
+      <div class="bni" onclick="nav('physio')">    <div class="bni-ico">👨‍⚕️</div><div class="bni-lbl">Physio</div></div>
+      <div class="bni on" onclick="nav('profile')"><div class="bni-ico">👤</div><div class="bni-lbl">Profile</div></div>
     </div>
   </div>
 
@@ -1733,11 +1823,12 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
       </button>
     </div>
 
-    <div class="bnav">
-      <div class="bni" onclick="nav('home')"><div class="bni-ico">🏠</div><div class="bni-lbl">Home</div></div>
+    <div class="bnav" data-pg="exercise">
+      <div class="bni" onclick="nav('home')">    <div class="bni-ico">🏠</div><div class="bni-lbl">Home</div></div>
       <div class="bni" onclick="nav('progress')"><div class="bni-ico">📊</div><div class="bni-lbl">Progress</div></div>
-      <div class="bni" onclick="nav('physio')"><div class="bni-ico">👨‍⚕️</div><div class="bni-lbl">My Physio</div></div>
-      <div class="bni" onclick="nav('profile')"><div class="bni-ico">👤</div><div class="bni-lbl">Profile</div></div>
+      <div class="bni" onclick="nav('logs')">    <div class="bni-ico">📋</div><div class="bni-lbl">My Logs</div></div>
+      <div class="bni" onclick="nav('physio')">  <div class="bni-ico">👨‍⚕️</div><div class="bni-lbl">Physio</div></div>
+      <div class="bni" onclick="nav('profile')"> <div class="bni-ico">👤</div><div class="bni-lbl">Profile</div></div>
     </div>
 
     <!-- LIVE SESSION OVERLAY -->
@@ -1848,6 +1939,71 @@ html,body{margin:0;padding:0;width:100%;min-height:100vh;}
 
   </div><!-- end pg-exercise -->
 
+
+  <!-- ══ PAGE 6: MY LOGS ══ -->
+  <div class="screen" id="pg-logs">
+    <div style="background:var(--w);padding:16px 22px 18px;border-bottom:1px solid var(--bdr);flex-shrink:0;">
+      <div style="font-size:22px;font-weight:900;color:var(--txt);">My Logs</div>
+      <div style="font-size:12px;color:var(--mut);margin-top:2px;">Pain history &amp; session log</div>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:16px 18px 100px;" id="logsBody">
+
+      <!-- Quick pain logger -->
+      <div style="background:var(--w);border-radius:18px;padding:18px;box-shadow:0 2px 12px rgba(45,106,79,0.07);margin-bottom:14px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+          <div style="font-size:14px;font-weight:900;color:var(--txt);">Pain Level Log</div>
+          <div style="font-size:11px;font-weight:700;color:var(--mut);" id="logsAvgPain">Avg: —</div>
+        </div>
+        <div style="font-size:11px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:8px;">Log pain right now</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px;" id="logsPagePainBtns">
+          <button onclick="logPainFromLogs(this,0)"  class="lpb">0</button>
+          <button onclick="logPainFromLogs(this,1)"  class="lpb">1</button>
+          <button onclick="logPainFromLogs(this,2)"  class="lpb">2</button>
+          <button onclick="logPainFromLogs(this,3)"  class="lpb">3</button>
+          <button onclick="logPainFromLogs(this,4)"  class="lpb">4</button>
+          <button onclick="logPainFromLogs(this,5)"  class="lpb">5</button>
+          <button onclick="logPainFromLogs(this,6)"  class="lpb">6</button>
+          <button onclick="logPainFromLogs(this,7)"  class="lpb">7</button>
+          <button onclick="logPainFromLogs(this,8)"  class="lpb">8</button>
+          <button onclick="logPainFromLogs(this,9)"  class="lpb">9</button>
+          <button onclick="logPainFromLogs(this,10)" class="lpb">10</button>
+        </div>
+        <div style="font-size:10px;color:var(--mut);font-weight:700;margin-bottom:6px;">0 = No pain &nbsp;·&nbsp; 7+ = High — consult physio</div>
+        <div id="logPainStatus" style="font-size:12px;font-weight:700;min-height:18px;color:var(--gm);"></div>
+      </div>
+
+      <!-- Pain trend chart -->
+      <div style="background:var(--w);border-radius:18px;padding:18px;box-shadow:0 2px 12px rgba(45,106,79,0.07);margin-bottom:14px;">
+        <div style="font-size:14px;font-weight:900;color:var(--txt);margin-bottom:4px;">Pain Trend</div>
+        <div style="font-size:11px;color:var(--mut);margin-bottom:14px;">Last logged entries</div>
+        <div style="width:100%;height:80px;display:flex;align-items:flex-end;gap:4px;" id="painTrendBars">
+          <div style="width:100%;text-align:center;color:var(--mut);font-size:11px;padding:20px 0;">No data yet</div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--mut);font-weight:700;margin-top:4px;"><span>Older</span><span>Recent</span></div>
+      </div>
+
+      <!-- Pain log history -->
+      <div style="background:var(--w);border-radius:18px;padding:18px;box-shadow:0 2px 12px rgba(45,106,79,0.07);margin-bottom:14px;">
+        <div style="font-size:14px;font-weight:900;color:var(--txt);margin-bottom:14px;">Recent Pain Logs</div>
+        <div id="painLogsList"><div style="color:var(--mut);font-size:12px;text-align:center;padding:12px 0;">No logs yet — use buttons above.</div></div>
+      </div>
+
+      <!-- Session log -->
+      <div style="background:var(--w);border-radius:18px;padding:18px;box-shadow:0 2px 12px rgba(45,106,79,0.07);margin-bottom:14px;">
+        <div style="font-size:14px;font-weight:900;color:var(--txt);margin-bottom:14px;">Session Log</div>
+        <div id="sessionLogList"><div style="color:var(--mut);font-size:12px;text-align:center;padding:12px 0;">No sessions yet.</div></div>
+      </div>
+
+    </div><!-- end logsBody -->
+    <div class="bnav" data-pg="logs">
+      <div class="bni" onclick="nav('home')">     <div class="bni-ico">🏠</div><div class="bni-lbl">Home</div></div>
+      <div class="bni" onclick="nav('progress')"> <div class="bni-ico">📊</div><div class="bni-lbl">Progress</div></div>
+      <div class="bni on" onclick="nav('logs')">  <div class="bni-ico">📋</div><div class="bni-lbl">My Logs</div></div>
+      <div class="bni" onclick="nav('physio')">   <div class="bni-ico">👨‍⚕️</div><div class="bni-lbl">Physio</div></div>
+      <div class="bni" onclick="nav('profile')">  <div class="bni-ico">👤</div><div class="bni-lbl">Profile</div></div>
+    </div>
+  </div>
+
 </div><!-- end phone -->
 </div><!-- end device-wrap -->
 
@@ -1925,35 +2081,45 @@ let isPaused = false;
 // ═══════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════
-const pages = { home:'pg-home', progress:'pg-progress', physio:'pg-physio', profile:'pg-profile', exercise:'pg-exercise' };
+const pages = { home:'pg-home', progress:'pg-progress', physio:'pg-physio', profile:'pg-profile', exercise:'pg-exercise', logs:'pg-logs' };
 function nav(page) {
   // Hide all screens
-  Object.values(pages).forEach(id => document.getElementById(id).classList.remove('active'));
-  document.getElementById(pages[page]).classList.add('active');
-  // Update ALL nav items across all bnavs (mobile bottom + desktop sidebar)
-  document.querySelectorAll('.bni').forEach(b => b.classList.remove('on'));
-  const map = ['home','progress','physio','profile'];
+  Object.keys(pages).forEach(k => {
+    const el = document.getElementById(pages[k]);
+    if (el) el.classList.remove('active');
+  });
+  // Show target screen
+  const target = document.getElementById(pages[page]);
+  if (target) target.classList.add('active');
+
+  // Update all nav items — match by label text
+  const labelMap = {
+    home:     ['home'],
+    progress: ['progress'],
+    logs:     ['my logs'],
+    physio:   ['physio', 'my physio'],
+    profile:  ['profile'],
+    exercise: ['home']   // exercise page keeps Home lit
+  };
+  const activeLabels = labelMap[page] || [page];
   document.querySelectorAll('.bni').forEach(b => {
-    // Match by icon or position
-    const lbl = b.querySelector('.bni-lbl')?.textContent?.toLowerCase();
-    if (lbl && page.toLowerCase().includes(lbl.split(' ')[0])) b.classList.add('on');
-    // Also match exercise -> home nav item stays lit
+    b.classList.remove('on');
+    const lbl = (b.querySelector('.bni-lbl')?.textContent || '').trim().toLowerCase();
+    if (activeLabels.includes(lbl)) b.classList.add('on');
   });
-  // More precise: find matching nav items by data or index
-  document.querySelectorAll('.bnav').forEach(bnav => {
-    const items = bnav.querySelectorAll('.bni');
-    items.forEach(b => b.classList.remove('on'));
-    map.forEach((pg, i) => {
-      if (pg === page && items[i]) items[i].classList.add('on');
-    });
-  });
-  if (page === 'progress') renderProgressPage();
-  if (page === 'home') refreshHomeStats();
-  // On desktop, scroll content area to top
+
+  // Page-specific refresh
+  if (page === 'progress') { try { renderProgressPage(); } catch(e){} }
+  if (page === 'home')     { try { refreshHomeStats(); updateStreakVisibility(); } catch(e){} }
+  if (page === 'logs')     { try { renderLogsPage(); } catch(e){} }
+
+  // Scroll content to top
   ['home-body','prog-body','physio-body','profile-body','ex-setup'].forEach(cls => {
     const el = document.querySelector('.' + cls);
     if (el) el.scrollTop = 0;
   });
+  const lb = document.getElementById('logsBody');
+  if (lb) lb.scrollTop = 0;
 }
 function goEx() { nav('exercise'); }
 
@@ -1988,6 +2154,7 @@ function setupMediaPipe() {
 // START LIVE SESSION
 // ═══════════════════════════════════════════════
 function startLive() {
+  requestWakeLock();
   // Set leg into state
   state.leg = selectedLeg;
   state.legIndices = selectedLeg==='left' ? {hip:24,knee:26,ankle:28} : {hip:23,knee:25,ankle:27};
@@ -2368,6 +2535,7 @@ function togglePause() {
 }
 
 function endSession() {
+  releaseWakeLock();
   if (state.validReps === 0) {
     // Still show complete overlay, just with zeros
     showCompleteOverlay({ validReps:0, totalReps:state.totalReps, successRate:0, avgRom:0, bestRom:0, avgTime:'0.0', score:0, issues:{...state.issues}, stabilityWarnings:state.stabilityWarnings });
@@ -2531,9 +2699,33 @@ async function sendReport() {
 // ═══════════════════════════════════════════════
 // PROGRESS PAGE — driven by localStorage
 // ═══════════════════════════════════════════════
+let _progressFilter = 'week';
+
+function setProgressFilter(period, btn) {
+  _progressFilter = period;
+  document.querySelectorAll('.wk-btn').forEach(b => b.classList.remove('on'));
+  if (btn) btn.classList.add('on');
+  renderProgressPage();
+}
+
 function renderProgressPage() {
-  const history = JSON.parse(localStorage.getItem('helify_sessions') || '[]');
+  const allSessions = JSON.parse(localStorage.getItem('helify_sessions') || '[]');
+  const now = new Date();
+  let history = allSessions;
+  if (_progressFilter === 'week') {
+    const c = new Date(now); c.setDate(c.getDate() - 7);
+    history = allSessions.filter(s => new Date(s.date || s.created_at || Date.now()) >= c);
+  } else if (_progressFilter === 'two_weeks') {
+    const c = new Date(now); c.setDate(c.getDate() - 14);
+    history = allSessions.filter(s => new Date(s.date || s.created_at || Date.now()) >= c);
+  } else if (_progressFilter === 'month') {
+    const c = new Date(now); c.setDate(c.getDate() - 30);
+    history = allSessions.filter(s => new Date(s.date || s.created_at || Date.now()) >= c);
+  }
+  // 'all' uses all sessions
+
   const chart = document.getElementById('barChart');
+  if (!chart) return;
   chart.innerHTML = '';
 
   if (history.length === 0) {
@@ -2637,12 +2829,40 @@ function selectEx(el) {
 }
 
 function setPain(btn, val) {
+  window._currentPainLevel = val;
+  // Reset all exercise-page pain buttons
   document.querySelectorAll('#painBtns button').forEach(b => {
-    b.style.background='var(--w)'; b.style.borderColor='var(--bdr)'; b.style.color='var(--txt)';
+    b.style.background = 'var(--w)'; b.style.borderColor = 'var(--bdr)'; b.style.color = 'var(--txt)';
   });
-  btn.style.background = val>=7 ? 'var(--red)' : 'var(--gm)';
-  btn.style.borderColor = val>=7 ? 'var(--red)' : 'var(--gm)';
-  btn.style.color = '#fff';
+  // Highlight selected
+  const col = val >= 7 ? 'var(--red)' : val >= 4 ? 'var(--gold)' : 'var(--gm)';
+  btn.style.background = col; btn.style.borderColor = col; btn.style.color = '#fff';
+  // Update home pain banner
+  const emojis = ['😌','🙂','😐','😕','😣','😖','😫','😤','😢','😭','🆘'];
+  const emoji = document.getElementById('painBannerEmoji');
+  const sub   = document.getElementById('painBannerSub');
+  if (emoji) emoji.textContent = emojis[Math.min(val,10)];
+  if (sub) {
+    if      (val === 0) sub.textContent = 'No pain — great start!';
+    else if (val <= 3)  sub.textContent = 'Mild pain (' + val + '/10) — noted';
+    else if (val <= 6)  sub.textContent = 'Moderate pain (' + val + '/10) — take care';
+    else                sub.textContent = 'High pain (' + val + '/10) — please rest';
+  }
+  // Disable start button if pain >= 7
+  const startBtn = document.getElementById('startSessionBtn');
+  if (startBtn) {
+    if (val >= 7) {
+      startBtn.style.background = 'var(--red)';
+      startBtn.textContent = '⚠ High Pain — Consult Physio First';
+      startBtn.onclick = null;
+    } else {
+      startBtn.style.background = 'var(--gm)';
+      startBtn.textContent = 'Start Session →';
+      startBtn.onclick = function(e) { if(e) e.stopPropagation(); goEx(); };
+    }
+  }
+  // Save to DB + localStorage
+  window.logPain(val);
 }
 
 function toggleVoiceFromUI() {
@@ -2677,7 +2897,7 @@ function injectDesktopSidebar() {
   hdr.id = 'desktopSidebarHdr';
   hdr.style.cssText = 'padding:24px 20px 20px;border-bottom:1px solid var(--bdr);flex-shrink:0;';
   hdr.innerHTML = `<div style="font-size:20px;font-weight:900;color:var(--gd);letter-spacing:-0.3px;">💚 Healify</div>
-    <div style="font-size:11px;color:var(--mut);margin-top:2px;">AI Rehab Platform</div>`;
+    <div style="font-size:11px;color:var(--mut);margin-top:2px;">Healify Platform</div>`;
   wrap.insertBefore(hdr, wrap.firstChild);
 }
 // showAuthScreen defined in first script block
@@ -2692,6 +2912,477 @@ function injectDesktopSidebar() {
 // ═══════════════════════════════════════════════
 // INIT — runs after all HTML/JS is parsed
 // ═══════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════
+// STREAK VISIBILITY
+// ══════════════════════════════════════════════════════
+function updateStreakVisibility() {
+  const sessions = JSON.parse(localStorage.getItem('helify_sessions') || '[]');
+  const streak   = (typeof calcStreak === 'function') ? calcStreak(sessions) : 0;
+  const row      = document.getElementById('streakRow');
+  if (!row) return;
+  if (streak >= 1) {
+    row.style.display = 'flex';
+    const numEl  = document.getElementById('homeStreakNum');
+    const subEl  = document.getElementById('homeStreakSub');
+    const chipEl = document.getElementById('homeStreakChip');
+    if (numEl)  numEl.textContent  = streak + ' Day Streak' + (streak >= 3 ? ' 🔥' : '');
+    if (subEl)  subEl.textContent  = 'Keep it going — great work!';
+    if (chipEl) chipEl.textContent = streak >= 5 ? 'On track 🔥' : 'Going!';
+  } else {
+    row.style.display = 'none';
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// PAIN LOGGING — save to DB + localStorage
+// ══════════════════════════════════════════════════════
+window._currentPainLevel = null;
+
+window.logPain = async function(val) {
+  const entry = { pain: val, logged_at: new Date().toISOString() };
+  // Always save locally
+  const local = JSON.parse(localStorage.getItem('healify_pain_logs') || '[]');
+  local.unshift(entry);
+  if (local.length > 100) local.length = 100;
+  localStorage.setItem('healify_pain_logs', JSON.stringify(local));
+  window._painLogs = local;
+  // Save to DB if logged in
+  if (!window._currentUser) return;
+  try {
+    await _sb.from('pain_logs').insert({
+      user_id:    window._currentUser.id,
+      pain:       val,
+      logged_at:  entry.logged_at
+    });
+  } catch(e) { console.warn('pain_logs save:', e.message); }
+};
+
+// ══════════════════════════════════════════════════════
+// LOGS PAGE
+// ══════════════════════════════════════════════════════
+function renderLogsPage() {
+  // Prefer DB logs, fall back to localStorage
+  const dbLogs = window._painLogs || [];
+  const local  = JSON.parse(localStorage.getItem('healify_pain_logs') || '[]');
+  const logs   = dbLogs.length >= local.length ? dbLogs : local;
+
+  // Average pain
+  const avgEl = document.getElementById('logsAvgPain');
+  if (avgEl) {
+    if (logs.length) {
+      const avg = (logs.reduce((a,l) => a + (l.pain||0), 0) / logs.length).toFixed(1);
+      avgEl.textContent = 'Avg: ' + avg + '/10';
+    } else { avgEl.textContent = 'Avg: —'; }
+  }
+
+  // Pain trend bars
+  const barsEl = document.getElementById('painTrendBars');
+  if (barsEl) {
+    if (!logs.length) {
+      barsEl.innerHTML = '<div style="width:100%;text-align:center;color:var(--mut);font-size:11px;padding:20px 0;">No data yet</div>';
+    } else {
+      const recent = logs.slice(0, 10).reverse();
+      barsEl.innerHTML = recent.map(function(l) {
+        var v   = l.pain || 0;
+        var pct = (v / 10) * 100;
+        var col = v >= 7 ? 'var(--red)' : v >= 4 ? 'var(--gold)' : 'var(--gm)';
+        var d   = new Date(l.logged_at || l.created_at || Date.now());
+        var lbl = d.toLocaleDateString('en', {month:'short', day:'numeric'});
+        return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;">' +
+          '<div style="font-size:8px;font-weight:800;color:var(--mut);">' + v + '</div>' +
+          '<div style="width:100%;background:' + col + ';border-radius:4px 4px 0 0;min-height:4px;height:' + pct + '%;"></div>' +
+          '<div style="font-size:8px;color:var(--mut);">' + (lbl.split(' ')[1]||'') + '</div>' +
+        '</div>';
+      }).join('');
+    }
+  }
+
+  // Pain log history list
+  const listEl = document.getElementById('painLogsList');
+  if (listEl) {
+    if (!logs.length) {
+      listEl.innerHTML = '<div style="color:var(--mut);font-size:12px;text-align:center;padding:12px 0;">No pain logs yet.</div>';
+    } else {
+      var painEmoji = ['😌','🙂','😐','😕','😣','😖','😫','😤','😢','😭','🆘'];
+      var painLabel = function(v) { return v===0?'No pain':v<=3?'Mild':v<=6?'Moderate':'High'; };
+      var painCol   = function(v) { return v>=7?'var(--red)':v>=4?'var(--gold)':'var(--gm)'; };
+      listEl.innerHTML = logs.slice(0, 20).map(function(l) {
+        var v  = l.pain || 0;
+        var d  = new Date(l.logged_at || l.created_at || Date.now());
+        var ts = d.toLocaleDateString('en',{month:'short',day:'numeric'}) + ' · ' + d.toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
+        return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--bdr);">' +
+          '<div style="width:40px;height:40px;border-radius:12px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;">' + painEmoji[Math.min(v,10)] + '</div>' +
+          '<div style="flex:1;">' +
+            '<div style="font-size:13px;font-weight:800;color:' + painCol(v) + ';">' + painLabel(v) + ' — ' + v + '/10</div>' +
+            '<div style="font-size:10px;color:var(--mut);margin-top:1px;">' + ts + '</div>' +
+          '</div>' +
+          '<div style="width:34px;height:34px;border-radius:50%;background:' + painCol(v) + ';display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;color:#fff;flex-shrink:0;">' + v + '</div>' +
+        '</div>';
+      }).join('') + (logs.length > 20 ? '<div style="font-size:11px;color:var(--mut);text-align:center;padding:8px 0;">+ ' + (logs.length-20) + ' more entries</div>' : '');
+    }
+  }
+
+  // Session log
+  var sesEl = document.getElementById('sessionLogList');
+  if (sesEl) {
+    var sessions = JSON.parse(localStorage.getItem('helify_sessions') || '[]');
+    if (!sessions.length) {
+      sesEl.innerHTML = '<div style="color:var(--mut);font-size:12px;text-align:center;padding:12px 0;">No sessions recorded yet.</div>';
+    } else {
+      sesEl.innerHTML = sessions.slice(0,15).map(function(s) {
+        var d    = new Date(s.date || s.created_at || Date.now());
+        var sc   = s.score || 0;
+        var flag = sc>=85?'🔥':sc>=70?'👍':'⚠️';
+        return '<div style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--bdr);">' +
+          '<div style="width:42px;height:42px;border-radius:12px;background:var(--gp);display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0;">' +
+            '<div style="font-size:14px;font-weight:900;color:var(--gm);line-height:1;">' + d.getDate() + '</div>' +
+            '<div style="font-size:8px;font-weight:800;color:var(--gl);text-transform:uppercase;">' + d.toLocaleDateString('en',{weekday:'short'}) + '</div>' +
+          '</div>' +
+          '<div style="flex:1;">' +
+            '<div style="font-size:13px;font-weight:800;color:var(--txt);">' + (s.leg||'').toUpperCase() + ' leg · ' + (s.validReps||0) + ' reps</div>' +
+            '<div style="font-size:11px;color:var(--mut);margin-top:1px;">ROM ' + (s.bestRom||0) + '° · Quality ' + sc + '%</div>' +
+          '</div>' +
+          '<div style="font-size:18px;">' + flag + '</div>' +
+        '</div>';
+      }).join('') + (sessions.length>15?'<div style="font-size:11px;color:var(--mut);text-align:center;padding:8px 0;">+ '+(sessions.length-15)+' more sessions</div>':'');
+    }
+  }
+}
+
+// Pain log from the My Logs page
+function logPainFromLogs(btn, val) {
+  document.querySelectorAll('.lpb').forEach(function(b) {
+    b.style.background = 'var(--w)'; b.style.borderColor = 'var(--bdr)'; b.style.color = 'var(--txt)';
+    b.classList.remove('active-pain');
+  });
+  var col = val >= 7 ? 'var(--red)' : val >= 4 ? 'var(--gold)' : 'var(--gm)';
+  btn.style.background = col; btn.style.borderColor = col; btn.style.color = '#fff';
+  btn.classList.add('active-pain');
+
+  var statusEl = document.getElementById('logPainStatus');
+  if (statusEl) { statusEl.style.color = 'var(--mut)'; statusEl.textContent = 'Saving…'; }
+
+  window.logPain(val).then(function() {
+    if (statusEl) {
+      statusEl.style.color = val >= 7 ? 'var(--red)' : 'var(--gm)';
+      statusEl.textContent = val >= 7
+        ? '⚠ High pain logged — consider contacting your physio'
+        : '✓ Pain ' + val + '/10 saved at ' + new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
+    }
+    renderLogsPage();
+  });
+}
+
+// ══════════════════════════════════════════════════════
+// MESSAGE SEND
+// ══════════════════════════════════════════════════════
+function sendMsg() {
+  var inp    = document.getElementById('msgInputField');
+  var text   = inp ? inp.value.trim() : '';
+  if (!text) return;
+
+  var sendBtn = document.getElementById('msgSendBtn');
+  var thread  = document.getElementById('msgThread');
+  var now     = new Date();
+  var ts      = now.toLocaleDateString('en',{month:'short',day:'numeric'}) + ', ' + now.toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
+
+  // Optimistic: show immediately
+  if (thread) {
+    var div = document.createElement('div');
+    div.innerHTML = '<div class="msg-bubble patient">' + text + '</div><div class="msg-time right">You · ' + ts + '</div>';
+    thread.appendChild(div);
+    thread.scrollTop = thread.scrollHeight;
+  }
+  if (inp)     inp.value = '';
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '…'; }
+
+  if (!window._currentUser) {
+    if (thread) {
+      var warn = document.createElement('div');
+      warn.style.cssText = 'background:#FEF2F2;border-radius:10px;padding:10px;font-size:12px;color:var(--red);text-align:center;margin-top:6px;';
+      warn.textContent = '⚠ Sign in to send messages to your physio';
+      thread.appendChild(warn);
+    }
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '↑'; }
+    return;
+  }
+
+  _sb.from('messages').insert({
+    patient_id:  window._currentUser.id,
+    sender:      'patient',
+    sender_name: (window._userProfile && window._userProfile.name) || 'Patient',
+    text:        text,
+    sent_at:     new Date().toISOString()
+  }).then(function(res) {
+    if (res.error) { console.warn('msg send error:', res.error.message); }
+    // Reload full thread
+    return _sb.from('messages').select('*').eq('patient_id', window._currentUser.id).order('sent_at', {ascending:true}).limit(20);
+  }).then(function(res) {
+    if (res && res.data) {
+      window._messages = res.data;
+      if (typeof renderMessages === 'function') renderMessages(res.data);
+    }
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '↑'; }
+  }).catch(function(e) {
+    console.warn('sendMsg error:', e);
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '↑'; }
+  });
+}
+// Keep window.sendMessage as alias for any remaining onclick references
+window.sendMessage = sendMsg;
+
+// ══════════════════════════════════════════════════════
+// PROFILE PIC
+// ══════════════════════════════════════════════════════
+function loadSavedProfilePic() {
+  var src   = localStorage.getItem('healify_profile_pic');
+  if (!src) return;
+  var img   = document.getElementById('profilePicImg');
+  var emoji = document.getElementById('profilePicEmoji');
+  if (img)   { img.src = src; img.style.display = 'block'; }
+  if (emoji) { emoji.style.display = 'none'; }
+}
+
+function handleProfilePic(input) {
+  if (!input.files || !input.files[0]) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    localStorage.setItem('healify_profile_pic', e.target.result);
+    loadSavedProfilePic();
+  };
+  reader.readAsDataURL(input.files[0]);
+}
+
+// ══════════════════════════════════════════════════════
+// PROFILE EDIT
+// ══════════════════════════════════════════════════════
+function toggleProfileEdit() {
+  var modal = document.getElementById('profileEditModal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  var p = window._userProfile || {};
+  var n = document.getElementById('editName');   if (n) n.value = p.name || '';
+  var a = document.getElementById('editAge');    if (a) a.value = p.age  || '';
+  var c = document.getElementById('editCity');   if (c) c.value = p.city || '';
+  var s = document.getElementById('editProfileStatus'); if (s) s.textContent = '';
+}
+
+function saveProfileEdit() {
+  var statusEl = document.getElementById('editProfileStatus');
+  var name  = (document.getElementById('editName')  || {}).value;
+  var age   = (document.getElementById('editAge')   || {}).value;
+  var city  = (document.getElementById('editCity')  || {}).value;
+  name = (name||'').trim(); city = (city||'').trim();
+  if (!name) { if(statusEl){statusEl.style.color='var(--red)';statusEl.textContent='⚠ Name is required';} return; }
+  if (statusEl) { statusEl.style.color='var(--mut)'; statusEl.textContent='Saving…'; }
+
+  var updates = { name: name, age: parseInt(age)||null, city: city };
+  var finish = function() {
+    if (window._userProfile) Object.assign(window._userProfile, updates);
+    ['profileNameVal','profileNameVal2'].forEach(function(id){ var e=document.getElementById(id); if(e) e.textContent=name; });
+    var ae=document.getElementById('profileAgeVal');   if(ae) ae.textContent=age?age+' years':'—';
+    var ce=document.getElementById('profileCityVal');  if(ce) ce.textContent=city||'—';
+    if(statusEl){statusEl.style.color='var(--gm)';statusEl.textContent='✓ Saved!';}
+    setTimeout(function(){ document.getElementById('profileEditModal').style.display='none'; }, 1000);
+  };
+
+  if (window._currentUser) {
+    _sb.from('profiles').update(updates).eq('id', window._currentUser.id)
+      .then(function(r){ if(r.error) throw r.error; finish(); })
+      .catch(function(e){ if(statusEl){statusEl.style.color='var(--red)';statusEl.textContent='Error: '+(e.message||'Try again');} });
+  } else { finish(); }
+}
+
+// ══════════════════════════════════════════════════════
+// PRESCRIPTION UPLOAD
+// ══════════════════════════════════════════════════════
+function handleRxUpload(input) {
+  if (!input.files || !input.files[0]) return;
+  var statusEl = document.getElementById('rxUploadStatus');
+  var file     = input.files[0];
+  if (statusEl) { statusEl.style.color='var(--mut)'; statusEl.textContent='Uploading…'; }
+  if (!window._currentUser) {
+    if(statusEl){statusEl.style.color='var(--red)';statusEl.textContent='⚠ Sign in first';}
+    return;
+  }
+  var ext  = file.name.split('.').pop();
+  var path = window._currentUser.id + '/prescription_' + Date.now() + '.' + ext;
+  _sb.storage.from('prescriptions').upload(path, file)
+    .then(function(r) {
+      if (r.error && !r.error.message.includes('already')) throw r.error;
+      return _sb.from('prescriptions').insert({
+        patient_id:  window._currentUser.id,
+        file_path:   path,
+        is_active:   false,
+        title:       'Uploaded by patient',
+        created_at:  new Date().toISOString()
+      });
+    })
+    .then(function() {
+      if(statusEl){statusEl.style.color='var(--gm)';statusEl.textContent='✓ Uploaded — physio will review it';}
+    })
+    .catch(function(e) {
+      if(statusEl){statusEl.style.color='var(--red)';statusEl.textContent='Upload failed: '+(e.message||'Try again');}
+    });
+}
+
+// ══════════════════════════════════════════════════════
+// BOOKING
+// ══════════════════════════════════════════════════════
+function openBookingModal() {
+  var modal = document.getElementById('bookingModal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  var s = document.getElementById('bookingStatus'); if (s) s.textContent = '';
+  var tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate()+1);
+  var d = document.getElementById('apptDateInput');
+  if (d) { d.min = tomorrow.toISOString().split('T')[0]; d.value = d.min; }
+}
+
+function confirmBooking() {
+  var statusEl = document.getElementById('bookingStatus');
+  var dateVal  = (document.getElementById('apptDateInput')  || {}).value;
+  var timeVal  = (document.getElementById('apptTimeInput')  || {}).value || '9:00 AM';
+  var typeVal  = (document.getElementById('apptType')       || {}).value || 'in-person';
+  var notesVal = ((document.getElementById('apptNotes')     || {}).value || '').trim();
+  if (!dateVal) { if(statusEl){statusEl.style.color='var(--red)';statusEl.textContent='⚠ Select a date';} return; }
+  if (statusEl) { statusEl.style.color='var(--mut)'; statusEl.textContent='Booking…'; }
+
+  var m = timeVal.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  var hour = m ? parseInt(m[1]) : 9, min = m ? parseInt(m[2]) : 0, ampm = m ? m[3].toUpperCase() : 'AM';
+  if (ampm==='PM' && hour!==12) hour+=12;
+  if (ampm==='AM' && hour===12) hour=0;
+  var dt = new Date(dateVal); dt.setHours(hour,min,0,0);
+  var title = typeVal==='video'?'Video Consultation':typeVal==='follow-up'?'Follow-up Session':'In-Person Session';
+
+  if (!window._currentUser) {
+    if(statusEl){statusEl.style.color='var(--red)';statusEl.textContent='⚠ Sign in to book';}
+    return;
+  }
+  _sb.from('appointments').insert({
+    patient_id:   window._currentUser.id,
+    datetime:     dt.toISOString(),
+    title:        title,
+    subtitle:     notesVal,
+    type:         'physio',
+    duration_mins: 45,
+    location:     'Clinic',
+    status:       'pending'
+  }).then(function(r) {
+    if (r.error) throw r.error;
+    if(statusEl){statusEl.style.color='var(--gm)';statusEl.textContent='✓ Appointment requested!';}
+    // Reload appointments
+    return _sb.from('appointments').select('*').eq('patient_id',window._currentUser.id).gte('datetime',new Date().toISOString()).order('datetime',{ascending:true});
+  }).then(function(r) {
+    if (r && r.data) {
+      window._appointments = r.data;
+      if (typeof renderUpcoming === 'function')        renderUpcoming(r.data);
+      if (typeof renderNextAppointment === 'function') renderNextAppointment(r.data[0]);
+    }
+    setTimeout(function(){ document.getElementById('bookingModal').style.display='none'; }, 1500);
+  }).catch(function(e) {
+    if(statusEl){statusEl.style.color='var(--red)';statusEl.textContent='Error: '+(e.message||'Try again');}
+  });
+}
+
+function getDirections() {
+  var appt = window._appointments && window._appointments[0];
+  var loc  = (appt && appt.location && appt.location !== 'TBD') ? appt.location : 'physiotherapy clinic near me';
+  window.open('https://www.google.com/maps/search/' + encodeURIComponent(loc), '_blank');
+}
+
+// ══════════════════════════════════════════════════════
+// NEARBY CLINICS
+// ══════════════════════════════════════════════════════
+var NEARBY_CLINICS = [
+  { name:'Healify Partner Clinic — Navrangpura', address:'Near Navrangpura BRTS, Ahmedabad', phone:'+91-79-2646-0000', rating:4.8, dist:'1.2 km', type:'Ortho & Sports Rehab' },
+  { name:'ActiveLife Physiotherapy',              address:'CG Road, Opp Fun Republic, Ahmedabad', phone:'+91-98250-00000', rating:4.6, dist:'2.1 km', type:'Post-Surgical Rehab' },
+  { name:'KneeRight Rehab Centre',               address:'Near Vastrapur Lake, Ahmedabad', phone:'+91-79-2685-0000', rating:4.5, dist:'3.4 km', type:'Knee & Hip Specialist' },
+  { name:'PhysioCare Plus',                      address:'Satellite Road, Ahmedabad', phone:'+91-99090-00000', rating:4.4, dist:'4.0 km', type:'General Physiotherapy' },
+];
+
+function findNearbyPhysio() {
+  var card = document.getElementById('nearbyClinicsCard');
+  var list = document.getElementById('clinicsList');
+  if (!card) return;
+  if (card.style.display !== 'none') { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  if (list) {
+    list.innerHTML = NEARBY_CLINICS.map(function(c) {
+      var mq = encodeURIComponent(c.name + ' ' + c.address);
+      return '<div style="padding:13px;border-radius:13px;background:var(--bg);margin-bottom:10px;border:1px solid var(--bdr);">' +
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px;">' +
+          '<div style="font-size:13px;font-weight:900;color:var(--txt);line-height:1.3;">' + c.name + '</div>' +
+          '<div style="font-size:11px;font-weight:800;color:var(--gold);flex-shrink:0;">⭐ ' + c.rating + '</div>' +
+        '</div>' +
+        '<div style="font-size:11px;color:var(--mut);margin-bottom:2px;">📍 ' + c.address + '</div>' +
+        '<div style="font-size:11px;color:var(--sub);margin-bottom:8px;">🏥 ' + c.type + ' · ' + c.dist + '</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">' +
+          '<button onclick="window.open('tel:' + c.phone + '')" style="padding:8px;background:var(--gp);border:none;border-radius:9px;font-size:11px;font-weight:800;color:var(--gm);cursor:pointer;font-family:'Nunito',sans-serif;">📞 Call</button>' +
+          '<button onclick="window.open('https://maps.google.com/?q=' + mq + '','_blank')" style="padding:8px;background:#EFF6FF;border:none;border-radius:9px;font-size:11px;font-weight:800;color:#1D4ED8;cursor:pointer;font-family:'Nunito',sans-serif;">🗺 Directions</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+  card.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+// ══════════════════════════════════════════════════════
+// FORGOT PASSWORD
+// ══════════════════════════════════════════════════════
+function showForgotPassword() {
+  var modal = document.getElementById('forgotModal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  var s = document.getElementById('forgotStatus'); if(s) s.textContent='';
+  var le = document.getElementById('loginEmail');
+  var fe = document.getElementById('forgotEmail'); if(fe && le) fe.value = le.value||'';
+}
+
+function doForgotPassword() {
+  var email    = (document.getElementById('forgotEmail')||{}).value;
+  var statusEl = document.getElementById('forgotStatus');
+  var btn      = document.getElementById('forgotBtn');
+  email = (email||'').trim();
+  if (!email || !email.includes('@')) {
+    if(statusEl){statusEl.style.color='var(--red)';statusEl.textContent='⚠ Enter a valid email';}
+    return;
+  }
+  if(btn) btn.disabled=true;
+  if(statusEl){statusEl.style.color='var(--mut)';statusEl.textContent='Checking account…';}
+
+  _sb.from('profiles').select('id').eq('email', email.toLowerCase()).maybeSingle()
+    .then(function(r) {
+      if (!r.data) { if(statusEl){statusEl.style.color='var(--red)';statusEl.textContent='⚠ No account found with this email';} if(btn) btn.disabled=false; return; }
+      var tempPass = 'Heal' + Math.floor(1000+Math.random()*9000);
+      return hashPassword(tempPass).then(function(pwd_hash) {
+        return _sb.from('profiles').update({password_hash:pwd_hash}).eq('id',r.data.id)
+          .then(function() {
+            if(statusEl){statusEl.style.color='var(--gm)';statusEl.textContent='✓ Temp password: ' + tempPass + '  (change after login)';}
+            if(btn) btn.disabled=false;
+          });
+      });
+    })
+    .catch(function(e) {
+      if(statusEl){statusEl.style.color='var(--red)';statusEl.textContent='Error: '+(e.message||'Try again');}
+      if(btn) btn.disabled=false;
+    });
+}
+
+// ══════════════════════════════════════════════════════
+// WAKE LOCK (keep screen on during calibration/exercise)
+// ══════════════════════════════════════════════════════
+var _wakeLock = null;
+function requestWakeLock() {
+  if ('wakeLock' in navigator) {
+    navigator.wakeLock.request('screen').then(function(wl){ _wakeLock=wl; }).catch(function(){});
+  }
+}
+function releaseWakeLock() {
+  if (_wakeLock) { try { _wakeLock.release(); } catch(e){} _wakeLock=null; }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   // Init TTS voices
   try { initTTS(); } catch(e) {}
